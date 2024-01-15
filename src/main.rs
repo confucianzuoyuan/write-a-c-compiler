@@ -13,7 +13,7 @@ mod replace_pseudos;
 fn main() {
     let program = "
 int main(void) {
-    return 1 + 2 * 3;
+    return 1 + 3 / 2;
 }
     ";
     let mut lexer = lexer::Lexer::new(program.as_bytes());
@@ -23,7 +23,7 @@ int main(void) {
     let ast = parser.parse();
     println!("{:?}", ast);
     let ir = ir_gen::gen(ast);
-    println!("{:?}", ir);
+    println!("{}", ir);
     let asm_ast = codegen::gen(ir);
     println!("{}", asm_ast);
     let mut replacement_state = replace_pseudos::ReplacementState::new();
