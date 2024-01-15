@@ -1,5 +1,5 @@
 #[derive(Clone, Debug, PartialEq)]
-pub enum T {
+pub enum Token {
     Identifier(String),
     Constant(i64),
     KWInt,
@@ -10,4 +10,21 @@ pub enum T {
     OpenBrace,
     CloseBrace,
     Semicolon,
+    Hyphen,
+    DoubleHyphen,
+    Tilde,
+    GreaterOrEqual,
+    LessOrEqual,
+    GreaterThan,
+    LessThan,
+    DoubleEqual,
+    NotEqual,
+    LogicalOr,
+    LogicalAnd,
+    Bang,
+    Percent,
+    Slash,
+    Star,
+    Plus,
+    Eof,
 }

@@ -1,11 +1,37 @@
 #[derive(Clone, Debug, PartialEq)]
+pub enum UnaryOperator {
+    Complement,
+    Negate,
+    Not,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum BinaryOperator {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Mod,
+    And,
+    Or,
+    Equal,
+    NotEqual,
+    LessThan,
+    LessOrEqual,
+    GreaterThan,
+    GreaterOrEqual,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Exp {
-    Constant { value: i64 },
+    Constant(i64),
+    Unary(UnaryOperator, Box<Exp>),
+    Binary(BinaryOperator, Box<Exp>, Box<Exp>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Statement {
-    Return { exp: Exp },
+    Return(Exp),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -14,8 +40,6 @@ pub enum FunctionDefinition {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum T {
-    Program {
-        function_definition: FunctionDefinition,
-    },
+pub enum Program {
+    FunctionDefinition(FunctionDefinition),
 }

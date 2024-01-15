@@ -1,23 +1,34 @@
-mod assembly;
-mod ast;
-mod codegen;
+mod lexer;
 mod tokens;
-mod lex;
-mod parse;
-mod emit;
+mod parser;
+mod ast;
+mod unique_ids;
+mod ir;
+mod ir_gen;
+mod assembly;
+mod codegen;
+mod instruction_fixup;
+mod replace_pseudos;
 
-/// riscv64-unknown-elf-gcc tmp.s
-/// qemu-riscv64 tmp
-/// echo $?
-/// 20
 fn main() {
     let program = "
-        int main(void) {
-            return 20;
-        }
+int main(void) {
+    return 1 + 2 * 3;
+}
     ";
-    let mut tokens = lex::lex(program);
-    let ast = parse::parse(&mut tokens);
-    let code = codegen::gen(ast);
-    emit::emit(code);
+    let mut lexer = lexer::Lexer::new(program.as_bytes());
+    let tokens = lexer.lex();
+    println!("{:?}", tokens);
+    let mut parser = parser::Parser::new(tokens);
+    let ast = parser.parse();
+    println!("{:?}", ast);
+    let ir = ir_gen::gen(ast);
+    println!("{:?}", ir);
+    let asm_ast = codegen::gen(ir);
+    println!("{}", asm_ast);
+    let mut replacement_state = replace_pseudos::ReplacementState::new();
+    let asm_ast1 = replacement_state.replace_pseudos(asm_ast);
+    println!("{}", asm_ast1);
+    let asm_ast2 = instruction_fixup::fixup_program(replacement_state.current_offset, asm_ast1);
+    println!("{}", asm_ast2);
 }

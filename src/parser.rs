@@ -1,0 +1,186 @@
+use crate::{ast, tokens, lexer};
+
+pub struct Parser {
+    tokens: Vec<tokens::Token>,
+    pos: usize,
+}
+
+impl Parser {
+    pub fn new(tokens: Vec<tokens::Token>) -> Self {
+        Parser {
+            tokens: tokens,
+            pos: 0,
+        }
+    }
+
+    fn current_token(&mut self) -> tokens::Token {
+        self.tokens[self.pos].clone()
+    }
+
+    fn eat_token(&mut self, expected: tokens::Token) {
+        let actual = self.current_token();
+        if actual != expected {
+            panic!("预期token是: {:?}, 实际token是: {:?}", expected, actual);
+        } else {
+            self.pos += 1;
+        }
+    }
+
+    fn get_precedence(&self, op: tokens::Token) -> Option<u8> {
+        match op {
+            tokens::Token::Star | tokens::Token::Slash | tokens::Token::Percent => Some(50),
+            tokens::Token::Plus | tokens::Token::Hyphen => Some(45),
+            tokens::Token::LessThan
+            | tokens::Token::LessOrEqual
+            | tokens::Token::GreaterThan
+            | tokens::Token::GreaterOrEqual => Some(35),
+            tokens::Token::DoubleEqual | tokens::Token::NotEqual => Some(30),
+            tokens::Token::LogicalAnd => Some(10),
+            tokens::Token::LogicalOr => Some(5),
+            _ => None,
+        }
+    }
+
+    fn parse_id(&mut self) -> String {
+        match self.current_token() {
+            tokens::Token::Identifier(x) => {
+                self.pos += 1;
+                x
+            }
+            other => panic!("预期是identifer token,实际是{:?}", other),
+        }
+    }
+
+    fn parse_constant(&mut self) -> ast::Exp {
+        match self.current_token() {
+            tokens::Token::Constant(c) => {
+                self.pos += 1;
+                ast::Exp::Constant(c)
+            }
+            other => panic!("预期是常数 token,实际是{:?}", other),
+        }
+    }
+
+    fn parse_unop(&mut self) -> ast::UnaryOperator {
+        match self.current_token() {
+            tokens::Token::Tilde => {
+                self.pos += 1;
+                ast::UnaryOperator::Complement
+            }
+            tokens::Token::Hyphen => {
+                self.pos += 1;
+                ast::UnaryOperator::Negate
+            }
+            tokens::Token::Bang => {
+                self.pos += 1;
+                ast::UnaryOperator::Not
+            }
+            other => panic!("预期是一元运算符 token,实际是{:?}", other),
+        }
+    }
+
+    fn parse_binop(&mut self) -> ast::BinaryOperator {
+        let current_token = self.current_token();
+        self.pos += 1;
+        match current_token {
+            tokens::Token::Plus => ast::BinaryOperator::Add,
+            tokens::Token::Hyphen => ast::BinaryOperator::Subtract,
+            tokens::Token::Star => ast::BinaryOperator::Multiply,
+            tokens::Token::Slash => ast::BinaryOperator::Divide,
+            tokens::Token::Percent => ast::BinaryOperator::Mod,
+            tokens::Token::LogicalAnd => ast::BinaryOperator::And,
+            tokens::Token::LogicalOr => ast::BinaryOperator::Or,
+            tokens::Token::DoubleEqual => ast::BinaryOperator::Equal,
+            tokens::Token::NotEqual => ast::BinaryOperator::NotEqual,
+            tokens::Token::LessThan => ast::BinaryOperator::LessThan,
+            tokens::Token::LessOrEqual => ast::BinaryOperator::LessOrEqual,
+            tokens::Token::GreaterThan => ast::BinaryOperator::GreaterThan,
+            tokens::Token::GreaterOrEqual => ast::BinaryOperator::GreaterOrEqual,
+            other => panic!("预期是二元运算符 token,实际是{:?}", other),
+        }
+    }
+
+    /// <factor> ::= <int> | <unop> <factor> | "(" <exp> ")"
+    fn parse_factor(&mut self) -> ast::Exp {
+        let next_token = self.current_token();
+        match next_token {
+            tokens::Token::Constant(_) => self.parse_constant(),
+            tokens::Token::Hyphen | tokens::Token::Tilde | tokens::Token::Bang => {
+                let operator = self.parse_unop();
+                let inner_exp = self.parse_factor();
+                ast::Exp::Unary(operator, Box::new(inner_exp))
+            }
+            tokens::Token::OpenParen => {
+                self.eat_token(tokens::Token::OpenParen); // 吃掉"(""
+                let e = self.parse_expression(0);
+                self.eat_token(tokens::Token::CloseParen); // 吃掉")"
+                e
+            }
+            _ => panic!("解析factor出错。"),
+        }
+    }
+
+    fn parse_exp_loop(&mut self, left: ast::Exp, next: tokens::Token, min_prec: u8) -> ast::Exp {
+        match self.get_precedence(next) {
+            Some(prec) if prec >= min_prec => {
+                let operator = self.parse_binop();
+                let right = self.parse_expression(prec + 1);
+                let left = ast::Exp::Binary(operator, Box::new(left), Box::new(right));
+                let peek_token = self.current_token();
+                self.parse_exp_loop(left, peek_token, min_prec)
+            }
+            _ => left,
+        }
+    }
+
+    /// <exp> ::= <factor> | <exp> <binop> <exp>
+    fn parse_expression(&mut self, min_prec: u8) -> ast::Exp {
+        let initial_factor = self.parse_factor();
+        let next_token = self.current_token();
+        self.parse_exp_loop(initial_factor, next_token, min_prec)
+    }
+
+    /// <statement> ::= "return" <exp> ";"
+    fn parse_statement(&mut self) -> ast::Statement {
+        self.eat_token(tokens::Token::KWReturn); // 吃掉"return"
+        let exp = self.parse_expression(0);
+        self.eat_token(tokens::Token::Semicolon); // 吃掉";"
+        ast::Statement::Return(exp)
+    }
+
+    /// <function> ::= "int" <identifier> "(" "void" ")" "{" <statement> "}"
+    fn parse_function_definition(&mut self) -> ast::FunctionDefinition {
+        self.eat_token(tokens::Token::KWInt); // 吃掉"int"
+        let fun_name = self.parse_id();
+        self.eat_token(tokens::Token::OpenParen); // 吃掉"("
+        self.eat_token(tokens::Token::KWVoid); // 吃掉"void"
+        self.eat_token(tokens::Token::CloseParen); // 吃掉")"
+        self.eat_token(tokens::Token::OpenBrace); // 吃掉"{"
+        let statement = self.parse_statement();
+        self.eat_token(tokens::Token::CloseBrace); // 吃掉"}"
+        ast::FunctionDefinition::Function {
+            name: fun_name,
+            body: statement,
+        }
+    }
+
+    /// <program> ::= <function>
+    pub fn parse(&mut self) -> ast::Program {
+        let fun_def = self.parse_function_definition();
+        ast::Program::FunctionDefinition(fun_def)
+    }
+}
+
+#[test]
+fn test() {
+    let prog = "
+    int main(void) {
+        return 1 + 2 * 3;
+    }
+    ";
+    let mut lexer = lexer::Lexer::new(prog.as_bytes());
+    let tokens = lexer.lex();
+    let mut parser = Parser::new(tokens);
+    let ast = parser.parse();
+    println!("{:?}", ast);
+}
