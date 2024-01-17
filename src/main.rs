@@ -9,12 +9,17 @@ mod assembly;
 mod codegen;
 mod instruction_fixup;
 mod replace_pseudos;
+mod var_resolution;
 
 fn main() {
     let program = "
-int main(void) {
-    return 1 + 3 / 2;
-}
+    int main(void) {
+        int a;
+        int b;
+        a = 2 + 3 * 4;
+        b = 10;
+        return a + b;
+    }
     ";
     let mut lexer = lexer::Lexer::new(program.as_bytes());
     let tokens = lexer.lex();
@@ -22,6 +27,9 @@ int main(void) {
     let mut parser = parser::Parser::new(tokens);
     let ast = parser.parse();
     println!("{:?}", ast);
+    let mut semantic_analyner = var_resolution::VarResolution::new();
+    let validated_ast = semantic_analyner.resolve(ast.clone());
+    println!("validated_ast: {:?}", validated_ast);
     let ir = ir_gen::gen(ast);
     println!("{}", ir);
     let asm_ast = codegen::gen(ir);

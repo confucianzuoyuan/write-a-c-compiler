@@ -150,7 +150,7 @@ impl<R: Read> Lexer<R> {
                         self.advance();
                         tokens::Token::DoubleEqual
                     } else {
-                        panic!("目前不支持赋值符号`=`\r\n");
+                        tokens::Token::EqualSign
                     }
                 }
                 b'&' => {

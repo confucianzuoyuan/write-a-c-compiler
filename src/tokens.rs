@@ -26,5 +26,6 @@ pub enum Token {
     Slash,
     Star,
     Plus,
+    EqualSign,
     Eof,
 }

@@ -1,4 +1,4 @@
-use crate::{ast, ir, unique_ids, lexer, parser};
+use crate::{ast, ir, lexer, parser, unique_ids};
 
 fn convert_op(op: ast::UnaryOperator) -> ir::UnaryOperator {
     match op {
@@ -28,10 +28,22 @@ fn convert_binop(op: ast::BinaryOperator) -> ir::BinaryOperator {
 fn emit_ir_for_exp(exp: ast::Exp) -> (Vec<ir::Instruction>, ir::IrValue) {
     match exp {
         ast::Exp::Constant(c) => (vec![], ir::IrValue::Constant(c)),
+        ast::Exp::Var(v) => (vec![], ir::IrValue::Var(v)),
         ast::Exp::Unary(op, inner) => emit_unary_expression(op, inner),
         ast::Exp::Binary(ast::BinaryOperator::And, e1, e2) => emit_and_expression(e1, e2),
         ast::Exp::Binary(ast::BinaryOperator::Or, e1, e2) => emit_or_expression(e1, e2),
         ast::Exp::Binary(op, e1, e2) => emit_binary_expression(op, e1, e2),
+        ast::Exp::Assignment(lhs, rhs) => match *lhs {
+            ast::Exp::Var(v) => {
+                let (mut rhs_instructions, rhs_result) = emit_ir_for_exp(*rhs);
+                rhs_instructions.push(ir::Instruction::Copy {
+                    src: rhs_result,
+                    dst: ir::IrValue::Var(v.clone()),
+                });
+                (rhs_instructions, ir::IrValue::Var(v))
+            }
+            _ => panic!("错误的左值。"),
+        },
     }
 }
 
@@ -73,7 +85,10 @@ fn emit_binary_expression(
     (instructions, dst)
 }
 
-fn emit_and_expression(e1: Box<ast::Exp>, e2: Box<ast::Exp>) -> (Vec<ir::Instruction>, ir::IrValue) {
+fn emit_and_expression(
+    e1: Box<ast::Exp>,
+    e2: Box<ast::Exp>,
+) -> (Vec<ir::Instruction>, ir::IrValue) {
     let (mut eval_v1, v1) = emit_ir_for_exp(*e1);
     let (mut eval_v2, v2) = emit_ir_for_exp(*e2);
     let false_label = unique_ids::make_label("and_false".to_string());
@@ -132,16 +147,46 @@ fn emit_ir_for_statement(statement: ast::Statement) -> Vec<ir::Instruction> {
             eval_exp.push(ir::Instruction::Return(v));
             eval_exp
         }
+        ast::Statement::Expression(e) => {
+            let (eval_exp, _exp_result) = emit_ir_for_exp(e);
+            eval_exp
+        }
+        ast::Statement::Null => vec![],
+    }
+}
+
+fn emit_ir_for_block_item(declaration: ast::BlockItem) -> Vec<ir::Instruction> {
+    match declaration {
+        ast::BlockItem::S(s) => emit_ir_for_statement(s),
+        ast::BlockItem::D(ast::Declaration {
+            name,
+            init: Some(e),
+        }) => {
+            let (eval_assignment, _assign_result) = emit_ir_for_exp(ast::Exp::Assignment(
+                Box::new(ast::Exp::Var(name)),
+                Box::new(e),
+            ));
+            eval_assignment
+        }
+        ast::BlockItem::D(ast::Declaration {
+            name: _,
+            init: None,
+        }) => vec![],
     }
 }
 
 fn emit_ir_for_function(f: ast::FunctionDefinition) -> ir::FunctionDefinition {
     match f {
         ast::FunctionDefinition::Function { name, body } => {
-            let instructions = emit_ir_for_statement(body);
+            let mut body_instructions = vec![];
+            for b in body {
+                body_instructions.append(&mut emit_ir_for_block_item(b));
+            }
+            let extra_return = ir::Instruction::Return(ir::IrValue::Constant(0));
+            body_instructions.push(extra_return);
             ir::FunctionDefinition::Function {
                 name: name,
-                body: instructions,
+                body: body_instructions,
             }
         }
     }

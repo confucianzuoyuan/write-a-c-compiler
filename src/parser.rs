@@ -1,4 +1,4 @@
-use crate::{ast, tokens, lexer};
+use crate::{ast, lexer, tokens};
 
 pub struct Parser {
     tokens: Vec<tokens::Token>,
@@ -37,6 +37,7 @@ impl Parser {
             tokens::Token::DoubleEqual | tokens::Token::NotEqual => Some(30),
             tokens::Token::LogicalAnd => Some(10),
             tokens::Token::LogicalOr => Some(5),
+            tokens::Token::EqualSign => Some(1),
             _ => None,
         }
     }
@@ -100,11 +101,12 @@ impl Parser {
         }
     }
 
-    /// <factor> ::= <int> | <unop> <factor> | "(" <exp> ")"
+    /// <factor> ::= <int> | <identifier> <unop> <factor> | "(" <exp> ")"
     fn parse_factor(&mut self) -> ast::Exp {
         let next_token = self.current_token();
         match next_token {
             tokens::Token::Constant(_) => self.parse_constant(),
+            tokens::Token::Identifier(_) => ast::Exp::Var(self.parse_id()),
             tokens::Token::Hyphen | tokens::Token::Tilde | tokens::Token::Bang => {
                 let operator = self.parse_unop();
                 let inner_exp = self.parse_factor();
@@ -116,18 +118,27 @@ impl Parser {
                 self.eat_token(tokens::Token::CloseParen); // 吃掉")"
                 e
             }
-            _ => panic!("解析factor出错。"),
+            _ => panic!("解析factor出错。碰到的token是：{:?}", next_token),
         }
     }
 
     fn parse_exp_loop(&mut self, left: ast::Exp, next: tokens::Token, min_prec: u8) -> ast::Exp {
-        match self.get_precedence(next) {
+        match self.get_precedence(next.clone()) {
             Some(prec) if prec >= min_prec => {
-                let operator = self.parse_binop();
-                let right = self.parse_expression(prec + 1);
-                let left = ast::Exp::Binary(operator, Box::new(left), Box::new(right));
-                let peek_token = self.current_token();
-                self.parse_exp_loop(left, peek_token, min_prec)
+                if next == tokens::Token::EqualSign {
+                    self.eat_token(tokens::Token::EqualSign);
+                    let right = self.parse_expression(prec);
+                    let left = ast::Exp::Assignment(Box::new(left), Box::new(right));
+                    let peek_token = self.current_token();
+
+                    self.parse_exp_loop(left, peek_token, min_prec)
+                } else {
+                    let operator = self.parse_binop();
+                    let right = self.parse_expression(prec + 1);
+                    let left = ast::Exp::Binary(operator, Box::new(left), Box::new(right));
+                    let peek_token = self.current_token();
+                    self.parse_exp_loop(left, peek_token, min_prec)
+                }
             }
             _ => left,
         }
@@ -140,15 +151,74 @@ impl Parser {
         self.parse_exp_loop(initial_factor, next_token, min_prec)
     }
 
-    /// <statement> ::= "return" <exp> ";"
-    fn parse_statement(&mut self) -> ast::Statement {
-        self.eat_token(tokens::Token::KWReturn); // 吃掉"return"
-        let exp = self.parse_expression(0);
-        self.eat_token(tokens::Token::Semicolon); // 吃掉";"
-        ast::Statement::Return(exp)
+    /// <declaration> ::= "int" <identifier> [ "=" <exp> ] ";"
+    fn parse_declaration(&mut self) -> ast::Declaration {
+        self.eat_token(tokens::Token::KWInt);
+        let var_name = self.parse_id();
+        match self.current_token() {
+            tokens::Token::Semicolon => {
+                self.eat_token(tokens::Token::Semicolon);
+                ast::Declaration {
+                    name: var_name,
+                    init: None,
+                }
+            }
+            tokens::Token::EqualSign => {
+                let init = self.parse_expression(0);
+                self.eat_token(tokens::Token::Semicolon);
+                ast::Declaration {
+                    name: var_name,
+                    init: Some(init),
+                }
+            }
+            other => panic!("预期是初始化器或者分号，实际上是：{:?}", other),
+        }
     }
 
-    /// <function> ::= "int" <identifier> "(" "void" ")" "{" <statement> "}"
+    /// <statement> ::= "return" <exp> ";" | <exp> ";" | ";"
+    fn parse_statement(&mut self) -> ast::Statement {
+        match self.current_token() {
+            tokens::Token::KWReturn => {
+                self.eat_token(tokens::Token::KWReturn); // 吃掉"return"
+                let exp = self.parse_expression(0);
+                self.eat_token(tokens::Token::Semicolon); // 吃掉";"
+                ast::Statement::Return(exp)
+            }
+            tokens::Token::Semicolon => {
+                self.eat_token(tokens::Token::Semicolon);
+                ast::Statement::Null
+            }
+            _ => {
+                let exp = self.parse_expression(0);
+                self.eat_token(tokens::Token::Semicolon);
+                ast::Statement::Expression(exp)
+            }
+        }
+    }
+
+    /// <block-item> ::= <statement> | <declaration>
+    fn parse_block_item(&mut self) -> ast::BlockItem {
+        match self.current_token() {
+            tokens::Token::KWInt => ast::BlockItem::D(self.parse_declaration()),
+            _ => ast::BlockItem::S(self.parse_statement()),
+        }
+    }
+
+    fn parse_block_item_list(&mut self) -> Vec<ast::BlockItem> {
+        match self.current_token() {
+            tokens::Token::CloseBrace => {
+                vec![]
+            }
+            _ => {
+                let next_block_item = self.parse_block_item();
+                let mut result = vec![next_block_item];
+                result.append(&mut self.parse_block_item_list());
+                result
+            }
+        }
+    }
+
+    /// <function> ::= "int" <identifier> "(" "void" ")" "{" { <block-item> } "}"
     fn parse_function_definition(&mut self) -> ast::FunctionDefinition {
         self.eat_token(tokens::Token::KWInt); // 吃掉"int"
         let fun_name = self.parse_id();
@@ -156,11 +226,11 @@ impl Parser {
         self.eat_token(tokens::Token::KWVoid); // 吃掉"void"
         self.eat_token(tokens::Token::CloseParen); // 吃掉")"
         self.eat_token(tokens::Token::OpenBrace); // 吃掉"{"
-        let statement = self.parse_statement();
+        let body = self.parse_block_item_list();
         self.eat_token(tokens::Token::CloseBrace); // 吃掉"}"
         ast::FunctionDefinition::Function {
             name: fun_name,
-            body: statement,
+            body: body,
         }
     }
 
