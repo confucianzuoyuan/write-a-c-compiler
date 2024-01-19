@@ -29,12 +29,22 @@ pub enum Exp {
     Binary(BinaryOperator, Box<Exp>, Box<Exp>),
     Var(String),
     Assignment(Box<Exp>, Box<Exp>),
+    Conditional {
+        condition: Box<Exp>,
+        then_result: Box<Exp>,
+        else_result: Box<Exp>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Statement {
     Return(Exp),
     Expression(Exp),
+    If {
+        condition: Exp,
+        then_clause: Box<Statement>,
+        else_clause: Option<Box<Statement>>,
+    },
     Null,
 }
 

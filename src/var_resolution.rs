@@ -39,6 +39,15 @@ impl VarResolution {
                 Box::new(self.resolve_exp(*e1)),
                 Box::new(self.resolve_exp(*e2)),
             ),
+            ast::Exp::Conditional {
+                condition,
+                then_result,
+                else_result,
+            } => ast::Exp::Conditional {
+                condition: Box::new(self.resolve_exp(*condition)),
+                then_result: Box::new(self.resolve_exp(*then_result)),
+                else_result: Box::new(self.resolve_exp(*else_result)),
+            },
             c @ ast::Exp::Constant(_) => c,
         }
     }
@@ -64,6 +73,18 @@ impl VarResolution {
         match statement {
             ast::Statement::Return(e) => ast::Statement::Return(self.resolve_exp(e)),
             ast::Statement::Expression(e) => ast::Statement::Expression(self.resolve_exp(e)),
+            ast::Statement::If {
+                condition,
+                then_clause,
+                else_clause,
+            } => ast::Statement::If {
+                condition: self.resolve_exp(condition),
+                then_clause: Box::new(self.resolve_statement(*then_clause)),
+                else_clause: match else_clause {
+                    None => None,
+                    Some(_else_clause) => Some(Box::new(self.resolve_statement(*_else_clause)))
+                },
+            },
             ast::Statement::Null => ast::Statement::Null,
         }
     }

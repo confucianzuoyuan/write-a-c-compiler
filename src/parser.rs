@@ -37,6 +37,7 @@ impl Parser {
             tokens::Token::DoubleEqual | tokens::Token::NotEqual => Some(30),
             tokens::Token::LogicalAnd => Some(10),
             tokens::Token::LogicalOr => Some(5),
+            tokens::Token::QuestionMark => Some(3),
             tokens::Token::EqualSign => Some(1),
             _ => None,
         }
@@ -118,7 +119,7 @@ impl Parser {
                 self.eat_token(tokens::Token::CloseParen); // 吃掉")"
                 e
             }
-            _ => panic!("解析factor出错。碰到的token是：{:?}", next_token),
+            _ => panic!("解析factor出错。碰到的token是：{:?}, {:?}", next_token, self.tokens[self.pos + 1]),
         }
     }
 
@@ -132,6 +133,16 @@ impl Parser {
                     let peek_token = self.current_token();
 
                     self.parse_exp_loop(left, peek_token, min_prec)
+                } else if next == tokens::Token::QuestionMark {
+                    let middle = self.parse_conditional_middle();
+                    let right = self.parse_expression(prec);
+                    let left = ast::Exp::Conditional {
+                        condition: Box::new(left),
+                        then_result: Box::new(middle),
+                        else_result: Box::new(right),
+                    };
+                    let peek_token = self.current_token();
+                    self.parse_exp_loop(left, peek_token, min_prec)
                 } else {
                     let operator = self.parse_binop();
                     let right = self.parse_expression(prec + 1);
@@ -142,6 +153,14 @@ impl Parser {
             }
             _ => left,
         }
+    }
+
+    /// "?" <exp> ":"
+    fn parse_conditional_middle(&mut self) -> ast::Exp {
+        self.eat_token(tokens::Token::QuestionMark);
+        let e = self.parse_expression(0);
+        self.eat_token(tokens::Token::Colon);
+        e
     }
 
     /// <exp> ::= <factor> | <exp> <binop> <exp>
@@ -164,6 +183,7 @@ impl Parser {
                 }
             }
             tokens::Token::EqualSign => {
+                self.eat_token(tokens::Token::EqualSign);
                 let init = self.parse_expression(0);
                 self.eat_token(tokens::Token::Semicolon);
                 ast::Declaration {
@@ -178,6 +198,7 @@ impl Parser {
     /// <statement> ::= "return" <exp> ";" | <exp> ";" | ";"
     fn parse_statement(&mut self) -> ast::Statement {
         match self.current_token() {
+            tokens::Token::KWIf => self.parse_if_statement(),
             tokens::Token::KWReturn => {
                 self.eat_token(tokens::Token::KWReturn); // 吃掉"return"
                 let exp = self.parse_expression(0);
@@ -193,6 +214,29 @@ impl Parser {
                 self.eat_token(tokens::Token::Semicolon);
                 ast::Statement::Expression(exp)
             }
+        }
+    }
+
+    fn parse_if_statement(&mut self) -> ast::Statement {
+        self.eat_token(tokens::Token::KWIf);
+        self.eat_token(tokens::Token::OpenParen);
+        let condition = self.parse_expression(0);
+        self.eat_token(tokens::Token::CloseParen);
+        let then_clause = self.parse_statement();
+        let else_clause = match self.current_token() {
+            tokens::Token::KWElse => {
+                self.pos += 1;
+                Some(self.parse_statement())
+            }
+            _ => None,
+        };
+        ast::Statement::If {
+            condition: condition,
+            then_clause: Box::new(then_clause),
+            else_clause: match else_clause {
+                None => None,
+                Some(_else_clause) => Some(Box::new(_else_clause)),
+            },
         }
     }
 

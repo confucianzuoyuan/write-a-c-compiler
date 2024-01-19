@@ -129,7 +129,7 @@ impl Display for Instruction {
             Instruction::Jmp(ref label) => write!(f, "\tjmp .L{label}\n"),
             Instruction::JmpCC(ref code, ref label) => write!(f, "\tj{code} .L{label}\n"),
             Instruction::SetCC(ref code, ref operand) => write!(f, "\tset{code} {operand}\n"),
-            Instruction::Label(ref label) => write!(f, "{label}:\n"),
+            Instruction::Label(ref label) => write!(f, ".L{label}:\n"),
             Instruction::AllocateStack(i) => write!(f, "\tsubq ${i}, %rsp\n"),
             Instruction::Ret => write!(
                 f,

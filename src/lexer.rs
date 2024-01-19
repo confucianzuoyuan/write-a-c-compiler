@@ -71,6 +71,8 @@ impl<R: Read> Lexer<R> {
             "void" => tokens::Token::KWVoid,
             "int" => tokens::Token::KWInt,
             "return" => tokens::Token::KWReturn,
+            "if" => tokens::Token::KWIf,
+            "else" => tokens::Token::KWElse,
             _ => tokens::Token::Identifier(buffer),
         };
         token
@@ -139,6 +141,14 @@ impl<R: Read> Lexer<R> {
                 b'~' => {
                     self.advance();
                     tokens::Token::Tilde
+                }
+                b'?' => {
+                    self.advance();
+                    tokens::Token::QuestionMark
+                }
+                b':' => {
+                    self.advance();
+                    tokens::Token::Colon
                 }
                 b'/' => {
                     self.advance();

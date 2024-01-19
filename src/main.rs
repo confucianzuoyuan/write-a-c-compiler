@@ -14,11 +14,9 @@ mod var_resolution;
 fn main() {
     let program = "
     int main(void) {
-        int a;
-        int b;
-        a = 2 + 3 * 4;
-        b = 10;
-        return a + b;
+        int a = 1 ? 2 ? 3 : 4 : 5;
+        int b = 0 ? 2 ? 3 : 4 : 5;
+        return a * b;
     }
     ";
     let mut lexer = lexer::Lexer::new(program.as_bytes());

@@ -44,6 +44,11 @@ fn emit_ir_for_exp(exp: ast::Exp) -> (Vec<ir::Instruction>, ir::IrValue) {
             }
             _ => panic!("错误的左值。"),
         },
+        ast::Exp::Conditional {
+            condition,
+            then_result,
+            else_result,
+        } => emit_conditional_expression(condition, then_result, else_result),
     }
 }
 
@@ -140,6 +145,31 @@ fn emit_or_expression(e1: Box<ast::Exp>, e2: Box<ast::Exp>) -> (Vec<ir::Instruct
     (instructions, dst)
 }
 
+fn emit_conditional_expression(
+    condition: Box<ast::Exp>,
+    then_result: Box<ast::Exp>,
+    else_result: Box<ast::Exp>,
+) -> (Vec<ir::Instruction>, ir::IrValue) {
+    let (mut eval_cond, c) = emit_ir_for_exp(*condition);
+    let (mut eval_v1, v1) = emit_ir_for_exp(*then_result);
+    let (mut eval_v2, v2) = emit_ir_for_exp(*else_result);
+    let else_label = unique_ids::make_label("conditional_else".to_string());
+    let end_label = unique_ids::make_label("conditional_end".to_string());
+    let dst_name = unique_ids::make_temporary();
+    let dst = ir::IrValue::Var(dst_name);
+    let mut instructions = vec![];
+    instructions.append(&mut eval_cond);
+    instructions.push(ir::Instruction::JumpIfZero(c, else_label.clone()));
+    instructions.append(&mut eval_v1);
+    instructions.push(ir::Instruction::Copy { src: v1, dst: dst.clone() });
+    instructions.push(ir::Instruction::Jump(end_label.clone()));
+    instructions.push(ir::Instruction::Label(else_label));
+    instructions.append(&mut eval_v2);
+    instructions.push(ir::Instruction::Copy { src: v2, dst: dst.clone() });
+    instructions.push(ir::Instruction::Label(end_label));
+    (instructions, dst)
+}
+
 fn emit_ir_for_statement(statement: ast::Statement) -> Vec<ir::Instruction> {
     match statement {
         ast::Statement::Return(e) => {
@@ -150,6 +180,9 @@ fn emit_ir_for_statement(statement: ast::Statement) -> Vec<ir::Instruction> {
         ast::Statement::Expression(e) => {
             let (eval_exp, _exp_result) = emit_ir_for_exp(e);
             eval_exp
+        }
+        ast::Statement::If { condition, then_clause, else_clause } => {
+            emit_ir_for_if_statement(condition, then_clause, else_clause)
         }
         ast::Statement::Null => vec![],
     }
@@ -172,6 +205,35 @@ fn emit_ir_for_block_item(declaration: ast::BlockItem) -> Vec<ir::Instruction> {
             name: _,
             init: None,
         }) => vec![],
+    }
+}
+
+fn emit_ir_for_if_statement(condition: ast::Exp, then_clause: Box<ast::Statement>, else_clause: Option<Box<ast::Statement>>) -> Vec<ir::Instruction> {
+    match else_clause {
+        None => {
+            let end_label = unique_ids::make_label("if_end".to_string());
+            let (mut eval_condition, c) = emit_ir_for_exp(condition);
+            let mut instructions = vec![];
+            instructions.append(&mut eval_condition);
+            instructions.push(ir::Instruction::JumpIfZero(c, end_label.clone()));
+            instructions.append(&mut emit_ir_for_statement(*then_clause));
+            instructions.push(ir::Instruction::Label(end_label));
+            instructions
+        }
+        Some(_else_clause) => {
+            let else_label = unique_ids::make_label("else".to_string());
+            let end_label = unique_ids::make_label("".to_string());
+            let (mut eval_condition, c) = emit_ir_for_exp(condition);
+            let mut instructions = vec![];
+            instructions.append(&mut eval_condition);
+            instructions.push(ir::Instruction::JumpIfZero(c, else_label.clone()));
+            instructions.append(&mut emit_ir_for_statement(*then_clause));
+            instructions.push(ir::Instruction::Jump(end_label.clone()));
+            instructions.push(ir::Instruction::Label(else_label));
+            instructions.append(&mut emit_ir_for_statement(*_else_clause));
+            instructions.push(ir::Instruction::Label(end_label));
+            instructions
+        }
     }
 }
 

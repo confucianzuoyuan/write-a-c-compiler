@@ -5,6 +5,8 @@ pub enum Token {
     KWInt,
     KWReturn,
     KWVoid,
+    KWIf,
+    KWElse,
     OpenParen,
     CloseParen,
     OpenBrace,
@@ -27,5 +29,7 @@ pub enum Token {
     Star,
     Plus,
     EqualSign,
+    QuestionMark,
+    Colon,
     Eof,
 }
