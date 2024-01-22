@@ -184,6 +184,13 @@ fn emit_ir_for_statement(statement: ast::Statement) -> Vec<ir::Instruction> {
         ast::Statement::If { condition, then_clause, else_clause } => {
             emit_ir_for_if_statement(condition, then_clause, else_clause)
         }
+        ast::Statement::Compound(ast::Block::Block(items)) => {
+            let mut instructions = vec![];
+            for item in items {
+                instructions.append(&mut emit_ir_for_block_item(item));
+            }
+            instructions
+        }
         ast::Statement::Null => vec![],
     }
 }
@@ -239,9 +246,9 @@ fn emit_ir_for_if_statement(condition: ast::Exp, then_clause: Box<ast::Statement
 
 fn emit_ir_for_function(f: ast::FunctionDefinition) -> ir::FunctionDefinition {
     match f {
-        ast::FunctionDefinition::Function { name, body } => {
+        ast::FunctionDefinition::Function { name, body: ast::Block::Block(block_items) } => {
             let mut body_instructions = vec![];
-            for b in body {
+            for b in block_items {
                 body_instructions.append(&mut emit_ir_for_block_item(b));
             }
             let extra_return = ir::Instruction::Return(ir::IrValue::Constant(0));

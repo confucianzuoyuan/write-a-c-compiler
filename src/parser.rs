@@ -119,7 +119,11 @@ impl Parser {
                 self.eat_token(tokens::Token::CloseParen); // 吃掉")"
                 e
             }
-            _ => panic!("解析factor出错。碰到的token是：{:?}, {:?}", next_token, self.tokens[self.pos + 1]),
+            _ => panic!(
+                "解析factor出错。碰到的token是：{:?}, {:?}",
+                next_token,
+                self.tokens[self.pos + 1]
+            ),
         }
     }
 
@@ -195,10 +199,15 @@ impl Parser {
         }
     }
 
-    /// <statement> ::= "return" <exp> ";" | <exp> ";" | ";"
+    /// <statement> ::= "return" <exp> ";"
+    ///               | <exp> ";"
+    ///               | "if" "(" <exp> ")" <statement> [ "else" <statement> ]
+    ///               | <block>
+    ///               | ";"
     fn parse_statement(&mut self) -> ast::Statement {
         match self.current_token() {
             tokens::Token::KWIf => self.parse_if_statement(),
+            tokens::Token::OpenBrace => ast::Statement::Compound(self.parse_block()),
             tokens::Token::KWReturn => {
                 self.eat_token(tokens::Token::KWReturn); // 吃掉"return"
                 let exp = self.parse_expression(0);
@@ -262,6 +271,14 @@ impl Parser {
         }
     }
 
+    /// <block> ::= "{" { <block-item> } "}"
+    fn parse_block(&mut self) -> ast::Block {
+        self.eat_token(tokens::Token::OpenBrace);
+        let block_items = self.parse_block_item_list();
+        self.eat_token(tokens::Token::CloseBrace);
+        ast::Block::Block(block_items)
+    }
+
     /// <function> ::= "int" <identifier> "(" "void" ")" "{" { <block-item> } "}"
     fn parse_function_definition(&mut self) -> ast::FunctionDefinition {
         self.eat_token(tokens::Token::KWInt); // 吃掉"int"
@@ -269,9 +286,7 @@ impl Parser {
         self.eat_token(tokens::Token::OpenParen); // 吃掉"("
         self.eat_token(tokens::Token::KWVoid); // 吃掉"void"
         self.eat_token(tokens::Token::CloseParen); // 吃掉")"
-        self.eat_token(tokens::Token::OpenBrace); // 吃掉"{"
-        let body = self.parse_block_item_list();
-        self.eat_token(tokens::Token::CloseBrace); // 吃掉"}"
+        let body = self.parse_block();
         ast::FunctionDefinition::Function {
             name: fun_name,
             body: body,

@@ -45,6 +45,7 @@ pub enum Statement {
         then_clause: Box<Statement>,
         else_clause: Option<Box<Statement>>,
     },
+    Compound(Block),
     Null,
 }
 
@@ -55,8 +56,13 @@ pub enum BlockItem {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub enum Block {
+    Block(Vec<BlockItem>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum FunctionDefinition {
-    Function { name: String, body: Vec<BlockItem> },
+    Function { name: String, body: Block },
 }
 
 #[derive(Clone, Debug, PartialEq)]

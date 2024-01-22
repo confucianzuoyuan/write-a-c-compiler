@@ -14,9 +14,13 @@ mod var_resolution;
 fn main() {
     let program = "
     int main(void) {
-        int a = 1 ? 2 ? 3 : 4 : 5;
-        int b = 0 ? 2 ? 3 : 4 : 5;
-        return a * b;
+        int a = 1;
+        {
+            int a = 2;
+        }
+        {
+            return a;
+        }
     }
     ";
     let mut lexer = lexer::Lexer::new(program.as_bytes());
@@ -25,10 +29,9 @@ fn main() {
     let mut parser = parser::Parser::new(tokens);
     let ast = parser.parse();
     println!("{:?}", ast);
-    let mut semantic_analyner = var_resolution::VarResolution::new();
-    let validated_ast = semantic_analyner.resolve(ast.clone());
+    let validated_ast = var_resolution::resolve(ast.clone());
     println!("validated_ast: {:?}", validated_ast);
-    let ir = ir_gen::gen(ast);
+    let ir = ir_gen::gen(validated_ast);
     println!("{}", ir);
     let asm_ast = codegen::gen(ir);
     println!("{}", asm_ast);
