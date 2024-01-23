@@ -10,17 +10,17 @@ mod codegen;
 mod instruction_fixup;
 mod replace_pseudos;
 mod var_resolution;
+mod label_loops;
 
 fn main() {
     let program = "
     int main(void) {
         int a = 1;
-        {
-            int a = 2;
-        }
-        {
-            return a;
-        }
+        do {
+            a = a * 2;
+        } while(a < 11);
+    
+        return a;
     }
     ";
     let mut lexer = lexer::Lexer::new(program.as_bytes());
@@ -29,7 +29,9 @@ fn main() {
     let mut parser = parser::Parser::new(tokens);
     let ast = parser.parse();
     println!("{:?}", ast);
-    let validated_ast = var_resolution::resolve(ast.clone());
+    let resolved_ast = var_resolution::resolve(ast.clone());
+    println!("resolved_ast: {:?}", resolved_ast);
+    let validated_ast = label_loops::label_loops(resolved_ast);
     println!("validated_ast: {:?}", validated_ast);
     let ir = ir_gen::gen(validated_ast);
     println!("{}", ir);

@@ -22,6 +22,16 @@ fn copy_variable_map(m: HashMap<String, VarEntry>) -> HashMap<String, VarEntry> 
     new_map
 }
 
+fn resolve_optional_exp(
+    var_map: HashMap<String, VarEntry>,
+    exp: Option<ast::Exp>,
+) -> Option<ast::Exp> {
+    match exp {
+        Some(e) => Some(resolve_exp(var_map, e)),
+        None => None,
+    }
+}
+
 fn resolve_exp(var_map: HashMap<String, VarEntry>, exp: ast::Exp) -> ast::Exp {
     match exp {
         ast::Exp::Assignment(left, right) => {
@@ -94,6 +104,22 @@ fn resolve_declaration(
     }
 }
 
+fn resolve_for_init(
+    var_map: HashMap<String, VarEntry>,
+    init: ast::ForInit,
+) -> (HashMap<String, VarEntry>, ast::ForInit) {
+    match init {
+        ast::ForInit::InitExp(e) => (
+            var_map.clone(),
+            ast::ForInit::InitExp(resolve_optional_exp(var_map, e)),
+        ),
+        ast::ForInit::InitDecl(d) => {
+            let (new_map, resolved_decl) = resolve_declaration(var_map, d);
+            (new_map, ast::ForInit::InitDecl(resolved_decl))
+        }
+    }
+}
+
 fn resolve_statement(
     var_map: HashMap<String, VarEntry>,
     statement: ast::Statement,
@@ -101,6 +127,41 @@ fn resolve_statement(
     match statement {
         ast::Statement::Return(e) => ast::Statement::Return(resolve_exp(var_map, e)),
         ast::Statement::Expression(e) => ast::Statement::Expression(resolve_exp(var_map, e)),
+        ast::Statement::While {
+            condition,
+            body,
+            id,
+        } => ast::Statement::While {
+            condition: resolve_exp(var_map.clone(), condition),
+            body: Box::new(resolve_statement(var_map, *body)),
+            id: id,
+        },
+        ast::Statement::DoWhile {
+            body,
+            condition,
+            id,
+        } => ast::Statement::DoWhile {
+            body: Box::new(resolve_statement(var_map.clone(), *body)),
+            condition: resolve_exp(var_map, condition),
+            id: id,
+        },
+        ast::Statement::For {
+            init,
+            condition,
+            post,
+            body,
+            id,
+        } => {
+            let var_map1 = copy_variable_map(var_map);
+            let (var_map2, resolved_init) = resolve_for_init(var_map1, init);
+            ast::Statement::For {
+                init: resolved_init,
+                condition: resolve_optional_exp(var_map2.clone(), condition),
+                post: resolve_optional_exp(var_map2.clone(), post),
+                body: Box::new(resolve_statement(var_map2, *body)),
+                id: id,
+            }
+        }
         ast::Statement::If {
             condition,
             then_clause,
@@ -117,7 +178,7 @@ fn resolve_statement(
             let new_variable_map = copy_variable_map(var_map);
             ast::Statement::Compound(resolve_block(new_variable_map, block))
         }
-        ast::Statement::Null => ast::Statement::Null,
+        s @ (ast::Statement::Null | ast::Statement::Break(_) | ast::Statement::Continue(_)) => s,
     }
 }
 

@@ -46,6 +46,25 @@ pub enum Statement {
         else_clause: Option<Box<Statement>>,
     },
     Compound(Block),
+    Break(String),
+    Continue(String),
+    While {
+        condition: Exp,
+        body: Box<Statement>,
+        id: String,
+    },
+    DoWhile {
+        body: Box<Statement>,
+        condition: Exp,
+        id: String,
+    },
+    For {
+        init: ForInit,
+        condition: Option<Exp>,
+        post: Option<Exp>,
+        body: Box<Statement>,
+        id: String,
+    },
     Null,
 }
 
@@ -74,4 +93,10 @@ pub enum Program {
 pub struct Declaration {
     pub name: String,
     pub init: Option<Exp>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ForInit {
+    InitDecl(Declaration),
+    InitExp(Option<Exp>),
 }

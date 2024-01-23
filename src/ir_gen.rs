@@ -1,5 +1,13 @@
 use crate::{ast, ir, lexer, parser, unique_ids};
 
+fn break_label(id: String) -> String {
+    format!("break.{}", id)
+}
+
+fn continue_label(id: String) -> String {
+    format!("continue.{}", id)
+}
+
 fn convert_op(op: ast::UnaryOperator) -> ir::UnaryOperator {
     match op {
         ast::UnaryOperator::Complement => ir::UnaryOperator::Complement,
@@ -161,11 +169,17 @@ fn emit_conditional_expression(
     instructions.append(&mut eval_cond);
     instructions.push(ir::Instruction::JumpIfZero(c, else_label.clone()));
     instructions.append(&mut eval_v1);
-    instructions.push(ir::Instruction::Copy { src: v1, dst: dst.clone() });
+    instructions.push(ir::Instruction::Copy {
+        src: v1,
+        dst: dst.clone(),
+    });
     instructions.push(ir::Instruction::Jump(end_label.clone()));
     instructions.push(ir::Instruction::Label(else_label));
     instructions.append(&mut eval_v2);
-    instructions.push(ir::Instruction::Copy { src: v2, dst: dst.clone() });
+    instructions.push(ir::Instruction::Copy {
+        src: v2,
+        dst: dst.clone(),
+    });
     instructions.push(ir::Instruction::Label(end_label));
     (instructions, dst)
 }
@@ -181,9 +195,11 @@ fn emit_ir_for_statement(statement: ast::Statement) -> Vec<ir::Instruction> {
             let (eval_exp, _exp_result) = emit_ir_for_exp(e);
             eval_exp
         }
-        ast::Statement::If { condition, then_clause, else_clause } => {
-            emit_ir_for_if_statement(condition, then_clause, else_clause)
-        }
+        ast::Statement::If {
+            condition,
+            then_clause,
+            else_clause,
+        } => emit_ir_for_if_statement(condition, then_clause, else_clause),
         ast::Statement::Compound(ast::Block::Block(items)) => {
             let mut instructions = vec![];
             for item in items {
@@ -191,6 +207,25 @@ fn emit_ir_for_statement(statement: ast::Statement) -> Vec<ir::Instruction> {
             }
             instructions
         }
+        ast::Statement::Break(id) => vec![ir::Instruction::Jump(break_label(id))],
+        ast::Statement::Continue(id) => vec![ir::Instruction::Jump(continue_label(id))],
+        ast::Statement::DoWhile {
+            body,
+            condition,
+            id,
+        } => emit_ir_for_do_loop(body, condition, id),
+        ast::Statement::While {
+            condition,
+            body,
+            id,
+        } => emit_ir_for_while_loop(condition, body, id),
+        ast::Statement::For {
+            init,
+            condition,
+            post,
+            body,
+            id,
+        } => emit_ir_for_for_loop(init, condition, post, body, id),
         ast::Statement::Null => vec![],
     }
 }
@@ -198,24 +233,34 @@ fn emit_ir_for_statement(statement: ast::Statement) -> Vec<ir::Instruction> {
 fn emit_ir_for_block_item(declaration: ast::BlockItem) -> Vec<ir::Instruction> {
     match declaration {
         ast::BlockItem::S(s) => emit_ir_for_statement(s),
-        ast::BlockItem::D(ast::Declaration {
+        ast::BlockItem::D(d) => emit_declaration(d),
+    }
+}
+
+fn emit_declaration(d: ast::Declaration) -> Vec<ir::Instruction> {
+    match d {
+        ast::Declaration {
             name,
             init: Some(e),
-        }) => {
+        } => {
             let (eval_assignment, _assign_result) = emit_ir_for_exp(ast::Exp::Assignment(
                 Box::new(ast::Exp::Var(name)),
                 Box::new(e),
             ));
             eval_assignment
         }
-        ast::BlockItem::D(ast::Declaration {
+        ast::Declaration {
             name: _,
             init: None,
-        }) => vec![],
+        } => vec![],
     }
 }
 
-fn emit_ir_for_if_statement(condition: ast::Exp, then_clause: Box<ast::Statement>, else_clause: Option<Box<ast::Statement>>) -> Vec<ir::Instruction> {
+fn emit_ir_for_if_statement(
+    condition: ast::Exp,
+    then_clause: Box<ast::Statement>,
+    else_clause: Option<Box<ast::Statement>>,
+) -> Vec<ir::Instruction> {
     match else_clause {
         None => {
             let end_label = unique_ids::make_label("if_end".to_string());
@@ -244,9 +289,94 @@ fn emit_ir_for_if_statement(condition: ast::Exp, then_clause: Box<ast::Statement
     }
 }
 
+fn emit_ir_for_do_loop(
+    body: Box<ast::Statement>,
+    condition: ast::Exp,
+    id: String,
+) -> Vec<ir::Instruction> {
+    let start_label = unique_ids::make_label("do_loop_start".to_string());
+    let cont_label = continue_label(id.clone());
+    let br_label = break_label(id);
+    let (mut eval_condition, c) = emit_ir_for_exp(condition);
+    let mut instructions = vec![];
+    instructions.push(ir::Instruction::Label(start_label.clone()));
+    instructions.append(&mut emit_ir_for_statement(*body));
+    instructions.push(ir::Instruction::Label(cont_label));
+    instructions.append(&mut eval_condition);
+    instructions.push(ir::Instruction::JumpIfNotZero(c, start_label));
+    instructions.push(ir::Instruction::Label(br_label));
+    instructions
+}
+
+fn emit_ir_for_while_loop(
+    condition: ast::Exp,
+    body: Box<ast::Statement>,
+    id: String,
+) -> Vec<ir::Instruction> {
+    let cont_label = continue_label(id.clone());
+    let br_label = break_label(id);
+    let (mut eval_condition, c) = emit_ir_for_exp(condition);
+    let mut instructions = vec![];
+    instructions.push(ir::Instruction::Label(cont_label.clone()));
+    instructions.append(&mut eval_condition);
+    instructions.push(ir::Instruction::JumpIfZero(c, br_label.clone()));
+    instructions.append(&mut emit_ir_for_statement(*body));
+    instructions.push(ir::Instruction::Jump(cont_label));
+    instructions.push(ir::Instruction::Label(br_label));
+    instructions
+}
+
+fn emit_ir_for_for_loop(
+    init: ast::ForInit,
+    condition: Option<ast::Exp>,
+    post: Option<ast::Exp>,
+    body: Box<ast::Statement>,
+    id: String,
+) -> Vec<ir::Instruction> {
+    let start_label = unique_ids::make_label("for_start".to_string());
+    let cont_label = continue_label(id.clone());
+    let br_label = break_label(id);
+    let mut for_init_instructions = match init {
+        ast::ForInit::InitDecl(d) => emit_declaration(d),
+        ast::ForInit::InitExp(e) => match e {
+            Some(_e) => {
+                let (instrs, _) = emit_ir_for_exp(_e);
+                instrs
+            }
+            None => vec![],
+        },
+    };
+    let mut test_condition = match condition {
+        Some(_condition) => {
+            let (mut instrs, v) = emit_ir_for_exp(_condition);
+            instrs.push(ir::Instruction::JumpIfZero(v, br_label.clone()));
+            instrs
+        }
+        None => vec![],
+    };
+    let mut post_instructions = match post {
+        Some(_post) => {
+            let (instrs, _post_result) = emit_ir_for_exp(_post);
+            instrs
+        }
+        None => vec![],
+    };
+    for_init_instructions.push(ir::Instruction::Label(start_label.clone()));
+    for_init_instructions.append(&mut test_condition);
+    for_init_instructions.append(&mut emit_ir_for_statement(*body));
+    for_init_instructions.push(ir::Instruction::Label(cont_label));
+    for_init_instructions.append(&mut post_instructions);
+    for_init_instructions.push(ir::Instruction::Jump(start_label));
+    for_init_instructions.push(ir::Instruction::Label(br_label));
+    for_init_instructions
+}
+
 fn emit_ir_for_function(f: ast::FunctionDefinition) -> ir::FunctionDefinition {
     match f {
-        ast::FunctionDefinition::Function { name, body: ast::Block::Block(block_items) } => {
+        ast::FunctionDefinition::Function {
+            name,
+            body: ast::Block::Block(block_items),
+        } => {
             let mut body_instructions = vec![];
             for b in block_items {
                 body_instructions.append(&mut emit_ir_for_block_item(b));

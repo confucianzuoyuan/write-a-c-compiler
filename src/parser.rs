@@ -203,29 +203,46 @@ impl Parser {
     ///               | <exp> ";"
     ///               | "if" "(" <exp> ")" <statement> [ "else" <statement> ]
     ///               | <block>
+    ///               | "break" ";"
+    ///               | "continue" ";"
+    ///               | "while" "(" <exp> ")" <statement>
+    ///               | "do" <statement> "while" "(" <exp> ")" ";"
+    ///               | "for" "(" <for-init> [ <exp> ] ";" [ <exp> ] ")" <statement>
     ///               | ";"
     fn parse_statement(&mut self) -> ast::Statement {
         match self.current_token() {
             tokens::Token::KWIf => self.parse_if_statement(),
             tokens::Token::OpenBrace => ast::Statement::Compound(self.parse_block()),
+            tokens::Token::KWDo => self.parse_do_loop(),
+            tokens::Token::KWWhile => self.parse_while_loop(),
+            tokens::Token::KWFor => self.parse_for_loop(),
+            tokens::Token::KWBreak => {
+                self.eat_token(tokens::Token::KWBreak);
+                self.eat_token(tokens::Token::Semicolon);
+                ast::Statement::Break("".to_string())
+            }
+            tokens::Token::KWContinue => {
+                self.eat_token(tokens::Token::KWContinue);
+                self.eat_token(tokens::Token::Semicolon);
+                ast::Statement::Continue("".to_string())
+            }
             tokens::Token::KWReturn => {
                 self.eat_token(tokens::Token::KWReturn); // 吃掉"return"
                 let exp = self.parse_expression(0);
                 self.eat_token(tokens::Token::Semicolon); // 吃掉";"
                 ast::Statement::Return(exp)
             }
-            tokens::Token::Semicolon => {
-                self.eat_token(tokens::Token::Semicolon);
-                ast::Statement::Null
-            }
             _ => {
-                let exp = self.parse_expression(0);
-                self.eat_token(tokens::Token::Semicolon);
-                ast::Statement::Expression(exp)
+                let opt_exp = self.parse_optional_expression(tokens::Token::Semicolon);
+                match opt_exp {
+                    Some(exp) => ast::Statement::Expression(exp),
+                    None => ast::Statement::Null,
+                }
             }
         }
     }
 
+    /// "if" "(" <exp> ")" <statement> [ "else" <statement> ]
     fn parse_if_statement(&mut self) -> ast::Statement {
         self.eat_token(tokens::Token::KWIf);
         self.eat_token(tokens::Token::OpenParen);
@@ -246,6 +263,53 @@ impl Parser {
                 None => None,
                 Some(_else_clause) => Some(Box::new(_else_clause)),
             },
+        }
+    }
+
+    /// "do" <statement> "while" "(" <exp> ")" ";"
+    fn parse_do_loop(&mut self) -> ast::Statement {
+        self.eat_token(tokens::Token::KWDo);
+        let body = self.parse_statement();
+        self.eat_token(tokens::Token::KWWhile);
+        self.eat_token(tokens::Token::OpenParen);
+        let condition = self.parse_expression(0);
+        self.eat_token(tokens::Token::CloseParen);
+        self.eat_token(tokens::Token::Semicolon);
+        ast::Statement::DoWhile {
+            body: Box::new(body),
+            condition: condition,
+            id: "".to_string(),
+        }
+    }
+
+    /// "while" "(" <exp> ")" <statement>
+    fn parse_while_loop(&mut self) -> ast::Statement {
+        self.eat_token(tokens::Token::KWWhile);
+        self.eat_token(tokens::Token::OpenParen);
+        let condition = self.parse_expression(0);
+        self.eat_token(tokens::Token::CloseParen);
+        let body = self.parse_statement();
+        ast::Statement::While {
+            condition: condition,
+            body: Box::new(body),
+            id: "".to_string(),
+        }
+    }
+
+    /// "for" "(" <for-init> [ <exp> ] ";" [ <exp> ] ")" <statement>
+    fn parse_for_loop(&mut self) -> ast::Statement {
+        self.eat_token(tokens::Token::KWFor);
+        self.eat_token(tokens::Token::OpenParen);
+        let init = self.parse_for_init();
+        let condition = self.parse_optional_expression(tokens::Token::Semicolon);
+        let post = self.parse_optional_expression(tokens::Token::CloseParen);
+        let body = self.parse_statement();
+        ast::Statement::For {
+            init: init,
+            condition: condition,
+            post: post,
+            body: Box::new(body),
+            id: "".to_string(),
         }
     }
 
@@ -277,6 +341,28 @@ impl Parser {
         let block_items = self.parse_block_item_list();
         self.eat_token(tokens::Token::CloseBrace);
         ast::Block::Block(block_items)
+    }
+
+    fn parse_optional_expression(&mut self, delim: tokens::Token) -> Option<ast::Exp> {
+        if self.current_token() == delim {
+            self.eat_token(delim);
+            None
+        } else {
+            let e = self.parse_expression(0);
+            self.eat_token(delim);
+            Some(e)
+        }
+    }
+
+    /// <for-init> ::= <declaration> | [ <exp> ] ";"
+    fn parse_for_init(&mut self) -> ast::ForInit {
+        match self.current_token() {
+            tokens::Token::KWInt => ast::ForInit::InitDecl(self.parse_declaration()),
+            _ => {
+                let opt_e = self.parse_optional_expression(tokens::Token::Semicolon);
+                ast::ForInit::InitExp(opt_e)
+            }
+        }
     }
 
     /// <function> ::= "int" <identifier> "(" "void" ")" "{" { <block-item> } "}"

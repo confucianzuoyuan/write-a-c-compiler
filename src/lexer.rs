@@ -73,6 +73,11 @@ impl<R: Read> Lexer<R> {
             "return" => tokens::Token::KWReturn,
             "if" => tokens::Token::KWIf,
             "else" => tokens::Token::KWElse,
+            "do" => tokens::Token::KWDo,
+            "for" => tokens::Token::KWFor,
+            "while" => tokens::Token::KWWhile,
+            "break" => tokens::Token::KWBreak,
+            "continue" => tokens::Token::KWContinue,
             _ => tokens::Token::Identifier(buffer),
         };
         token
