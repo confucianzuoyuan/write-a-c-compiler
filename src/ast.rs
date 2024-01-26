@@ -34,6 +34,10 @@ pub enum Exp {
         then_result: Box<Exp>,
         else_result: Box<Exp>,
     },
+    FunCall {
+        f: String,
+        args: Vec<Exp>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -80,23 +84,31 @@ pub enum Block {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum FunctionDefinition {
-    Function { name: String, body: Block },
-}
-
-#[derive(Clone, Debug, PartialEq)]
 pub enum Program {
-    FunctionDefinition(FunctionDefinition),
+    FunctionDefinition(Vec<FunctionDeclaration>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Declaration {
+pub struct VariableDeclaration {
     pub name: String,
     pub init: Option<Exp>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ForInit {
-    InitDecl(Declaration),
+    InitDecl(VariableDeclaration),
     InitExp(Option<Exp>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FunctionDeclaration {
+    pub name: String,
+    pub params: Vec<String>,
+    pub body: Option<Block>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Declaration {
+    FunDecl(FunctionDeclaration),
+    VarDecl(VariableDeclaration),
 }

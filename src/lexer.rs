@@ -119,6 +119,10 @@ impl<R: Read> Lexer<R> {
                     self.advance();
                     tokens::Token::Semicolon
                 }
+                b',' => {
+                    self.advance();
+                    tokens::Token::Comma
+                }
                 b'+' => {
                     self.advance();
                     tokens::Token::Plus

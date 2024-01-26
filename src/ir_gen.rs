@@ -1,4 +1,8 @@
-use crate::{ast, ir, lexer, parser, unique_ids};
+use crate::{
+    ast,
+    ir::{self, IrValue},
+    lexer, parser, unique_ids,
+};
 
 fn break_label(id: String) -> String {
     format!("break.{}", id)
@@ -57,6 +61,7 @@ fn emit_ir_for_exp(exp: ast::Exp) -> (Vec<ir::Instruction>, ir::IrValue) {
             then_result,
             else_result,
         } => emit_conditional_expression(condition, then_result, else_result),
+        ast::Exp::FunCall { f, args } => emit_fun_call(f, args),
     }
 }
 
@@ -233,23 +238,30 @@ fn emit_ir_for_statement(statement: ast::Statement) -> Vec<ir::Instruction> {
 fn emit_ir_for_block_item(declaration: ast::BlockItem) -> Vec<ir::Instruction> {
     match declaration {
         ast::BlockItem::S(s) => emit_ir_for_statement(s),
-        ast::BlockItem::D(d) => emit_declaration(d),
+        ast::BlockItem::D(d) => emit_local_declaration(d),
     }
 }
 
-fn emit_declaration(d: ast::Declaration) -> Vec<ir::Instruction> {
+fn emit_local_declaration(d: ast::Declaration) -> Vec<ir::Instruction> {
     match d {
-        ast::Declaration {
+        ast::Declaration::VarDecl(vd) => emit_var_declaration(vd),
+        ast::Declaration::FunDecl(_) => vec![],
+    }
+}
+
+fn emit_var_declaration(vd: ast::VariableDeclaration) -> Vec<ir::Instruction> {
+    match vd {
+        ast::VariableDeclaration {
             name,
             init: Some(e),
         } => {
-            let (eval_assignment, _assign_result) = emit_ir_for_exp(ast::Exp::Assignment(
+            let (eval_assignment, _) = emit_ir_for_exp(ast::Exp::Assignment(
                 Box::new(ast::Exp::Var(name)),
                 Box::new(e),
             ));
             eval_assignment
         }
-        ast::Declaration {
+        ast::VariableDeclaration {
             name: _,
             init: None,
         } => vec![],
@@ -337,7 +349,7 @@ fn emit_ir_for_for_loop(
     let cont_label = continue_label(id.clone());
     let br_label = break_label(id);
     let mut for_init_instructions = match init {
-        ast::ForInit::InitDecl(d) => emit_declaration(d),
+        ast::ForInit::InitDecl(d) => emit_var_declaration(d),
         ast::ForInit::InitExp(e) => match e {
             Some(_e) => {
                 let (instrs, _) = emit_ir_for_exp(_e);
@@ -371,30 +383,53 @@ fn emit_ir_for_for_loop(
     for_init_instructions
 }
 
-fn emit_ir_for_function(f: ast::FunctionDefinition) -> ir::FunctionDefinition {
-    match f {
-        ast::FunctionDefinition::Function {
-            name,
-            body: ast::Block::Block(block_items),
-        } => {
+fn emit_fun_call(f: String, args: Vec<ast::Exp>) -> (Vec<ir::Instruction>, IrValue) {
+    let dst_name = unique_ids::make_temporary();
+    let dst = ir::IrValue::Var(dst_name);
+    let mut arg_instructions = vec![];
+    let mut arg_vals = vec![];
+    for arg in args {
+        let mut t = emit_ir_for_exp(arg);
+        arg_instructions.append(&mut t.0);
+        arg_vals.push(t.1);
+    }
+    arg_instructions.push(ir::Instruction::FunCall {
+        f: f,
+        args: arg_vals,
+        dst: dst.clone(),
+    });
+    (arg_instructions, dst)
+}
+
+fn emit_fun_declaration(fn_def: ast::FunctionDeclaration) -> Option<ir::FunctionDefinition> {
+    match fn_def.body {
+        Some(ast::Block::Block(block_items)) => {
             let mut body_instructions = vec![];
-            for b in block_items {
-                body_instructions.append(&mut emit_ir_for_block_item(b));
+            for item in block_items {
+                body_instructions.append(&mut emit_ir_for_block_item(item));
             }
             let extra_return = ir::Instruction::Return(ir::IrValue::Constant(0));
             body_instructions.push(extra_return);
-            ir::FunctionDefinition::Function {
-                name: name,
+            Some(ir::FunctionDefinition::Function {
+                name: fn_def.name,
+                params: fn_def.params,
                 body: body_instructions,
-            }
+            })
         }
+        None => None,
     }
 }
 
-pub fn gen(fn_def: ast::Program) -> ir::Program {
-    match fn_def {
-        ast::Program::FunctionDefinition(f) => {
-            ir::Program::FunctionDefinition(emit_ir_for_function(f))
+pub fn gen(program: ast::Program) -> ir::Program {
+    match program {
+        ast::Program::FunctionDefinition(fn_defs) => {
+            let mut ir_fn_defs = vec![];
+            for fn_def in fn_defs {
+                if let Some(fn_def_ir) = emit_fun_declaration(fn_def) {
+                    ir_fn_defs.push(fn_def_ir);
+                }
+            }
+            ir::Program::FunctionDefinition(ir_fn_defs)
         }
     }
 }

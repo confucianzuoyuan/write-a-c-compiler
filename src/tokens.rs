@@ -36,5 +36,6 @@ pub enum Token {
     EqualSign,
     QuestionMark,
     Colon,
+    Comma,
     Eof,
 }

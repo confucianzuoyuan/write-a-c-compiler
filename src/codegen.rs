@@ -1,5 +1,14 @@
 use crate::{assembly, ir};
 
+const PARAM_PASSING_REGS: [assembly::Reg; 6] = [
+    assembly::Reg::DI,
+    assembly::Reg::SI,
+    assembly::Reg::DX,
+    assembly::Reg::CX,
+    assembly::Reg::R8,
+    assembly::Reg::R9,
+];
+
 fn convert_val(ir_value: ir::IrValue) -> assembly::Operand {
     match ir_value {
         ir::IrValue::Constant(i) => assembly::Operand::Imm(i),
@@ -41,6 +50,62 @@ fn convert_cond_code(ir_cond_code: ir::BinaryOperator) -> assembly::CondCode {
         ir::BinaryOperator::LessOrEqual => assembly::CondCode::LE,
         _ => panic!("不是条件码。"),
     }
+}
+
+fn convert_function_call(
+    f: String,
+    args: Vec<ir::IrValue>,
+    dst: ir::IrValue,
+) -> Vec<assembly::Instruction> {
+    let mut reg_args = vec![];
+    let mut stack_args = vec![];
+    for (i, arg) in args.iter().enumerate() {
+        if i <= 6 {
+            reg_args.push(arg.clone());
+        } else {
+            stack_args.push(arg.clone());
+        }
+    }
+    let stack_padding = if stack_args.len() % 2 == 0 { 0 } else { 8 };
+    let mut instructions = if stack_padding == 0 {
+        vec![]
+    } else {
+        vec![assembly::Instruction::AllocateStack(stack_padding)]
+    };
+    for (i, reg_arg) in reg_args.iter().enumerate() {
+        let r = PARAM_PASSING_REGS[i].clone();
+        let assembly_arg = convert_val(reg_arg.clone());
+        instructions.push(assembly::Instruction::Mov(
+            assembly_arg,
+            assembly::Operand::Reg(r),
+        ));
+    }
+    for (_, stack_arg) in stack_args.iter().rev().enumerate() {
+        let assembly_arg = convert_val(stack_arg.clone());
+        instructions.append(&mut match assembly_arg {
+            assembly::Operand::Imm(_) | assembly::Operand::Reg(_) => {
+                vec![assembly::Instruction::Push(assembly_arg)]
+            }
+            _ => vec![
+                assembly::Instruction::Mov(assembly_arg, assembly::Operand::Reg(assembly::Reg::AX)),
+                assembly::Instruction::Push(assembly::Operand::Reg(assembly::Reg::AX)),
+            ],
+        });
+    }
+    instructions.push(assembly::Instruction::Call(f));
+    let bytes_to_remove = (8 * stack_args.len() as i64) + stack_padding;
+    let mut dealloc = if bytes_to_remove == 0 {
+        vec![]
+    } else {
+        vec![assembly::Instruction::DeallocateStack(bytes_to_remove)]
+    };
+    instructions.append(&mut dealloc);
+    let assembly_dst = convert_val(dst);
+    instructions.push(assembly::Instruction::Mov(
+        assembly::Operand::Reg(assembly::Reg::AX),
+        assembly_dst,
+    ));
+    instructions
 }
 
 fn convert_instruction(ir_instruction: ir::Instruction) -> Vec<assembly::Instruction> {
@@ -114,7 +179,10 @@ fn convert_instruction(ir_instruction: ir::Instruction) -> Vec<assembly::Instruc
                         ),
                         assembly::Instruction::Cdq,
                         assembly::Instruction::Idiv(asm_src2),
-                        assembly::Instruction::Mov(assembly::Operand::Reg(result_reg), asm_dst.clone()),
+                        assembly::Instruction::Mov(
+                            assembly::Operand::Reg(result_reg),
+                            asm_dst.clone(),
+                        ),
                     ]
                 }
                 _ => {
@@ -146,12 +214,41 @@ fn convert_instruction(ir_instruction: ir::Instruction) -> Vec<assembly::Instruc
             ]
         }
         ir::Instruction::Label(l) => vec![assembly::Instruction::Label(l)],
+        ir::Instruction::FunCall { f, args, dst } => convert_function_call(f, args, dst),
     }
+}
+
+fn pass_params(param_list: Vec<String>) -> Vec<assembly::Instruction> {
+    let mut register_params = vec![];
+    let mut stack_params = vec![];
+    for (i, param) in param_list.iter().enumerate() {
+        if i <= 6 {
+            register_params.push(param.clone());
+        } else {
+            stack_params.push(param.clone());
+        }
+    }
+    let mut instructions = vec![];
+    for (i, param) in register_params.iter().enumerate() {
+        let r = PARAM_PASSING_REGS[i].clone();
+        instructions.push(assembly::Instruction::Mov(
+            assembly::Operand::Reg(r),
+            assembly::Operand::Pseudo(param.clone()),
+        ));
+    }
+    for (i, param) in stack_params.iter().enumerate() {
+        let stk = assembly::Operand::Stack(16 + (8 * i as i64));
+        instructions.push(assembly::Instruction::Mov(
+            stk,
+            assembly::Operand::Pseudo(param.clone()),
+        ))
+    }
+    instructions
 }
 
 fn convert_function(f: ir::FunctionDefinition) -> assembly::FunctionDefinition {
     match f {
-        ir::FunctionDefinition::Function { name, body } => {
+        ir::FunctionDefinition::Function { name, params: _, body } => {
             let mut instructions = vec![];
             for instruction in body {
                 instructions.append(&mut convert_instruction(instruction));
@@ -166,8 +263,12 @@ fn convert_function(f: ir::FunctionDefinition) -> assembly::FunctionDefinition {
 
 pub fn gen(program: ir::Program) -> assembly::Program {
     match program {
-        ir::Program::FunctionDefinition(fn_def) => {
-            assembly::Program::FunctionDefinition(convert_function(fn_def))
+        ir::Program::FunctionDefinition(fn_defs) => {
+            let mut arr = vec![];
+            for fn_def in fn_defs {
+                arr.push(convert_function(fn_def));
+            }
+            assembly::Program::FunctionDefinition(arr)
         }
     }
 }

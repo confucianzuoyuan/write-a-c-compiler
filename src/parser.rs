@@ -104,10 +104,18 @@ impl Parser {
 
     /// <factor> ::= <int> | <identifier> <unop> <factor> | "(" <exp> ")"
     fn parse_factor(&mut self) -> ast::Exp {
-        let next_token = self.current_token();
-        match next_token {
+        match self.current_token() {
             tokens::Token::Constant(_) => self.parse_constant(),
-            tokens::Token::Identifier(_) => ast::Exp::Var(self.parse_id()),
+            tokens::Token::Identifier(_) => {
+                let id = self.parse_id();
+                match self.current_token() {
+                    tokens::Token::OpenParen => {
+                        let args = self.parse_optional_arg_list();
+                        ast::Exp::FunCall { f: id, args: args }
+                    }
+                    _ => ast::Exp::Var(id),
+                }
+            }
             tokens::Token::Hyphen | tokens::Token::Tilde | tokens::Token::Bang => {
                 let operator = self.parse_unop();
                 let inner_exp = self.parse_factor();
@@ -121,10 +129,42 @@ impl Parser {
             }
             _ => panic!(
                 "解析factor出错。碰到的token是：{:?}, {:?}",
-                next_token,
+                self.current_token(),
                 self.tokens[self.pos + 1]
             ),
         }
+    }
+
+    fn parse_optional_arg_list(&mut self) -> Vec<ast::Exp> {
+        self.eat_token(tokens::Token::OpenParen);
+        let args = match self.current_token() {
+            tokens::Token::CloseParen => vec![],
+            _ => self.parse_arg_list(),
+        };
+        self.eat_token(tokens::Token::CloseParen);
+        args
+    }
+
+    fn parse_arg_list(&mut self) -> Vec<ast::Exp> {
+        let arg = self.parse_expression(0);
+        match self.current_token() {
+            tokens::Token::Comma => {
+                self.eat_token(tokens::Token::Comma);
+                let mut result = vec![];
+                result.push(arg);
+                result.append(&mut self.parse_arg_list());
+                result
+            }
+            _ => vec![arg],
+        }
+    }
+
+    /// "?" <exp> ":"
+    fn parse_conditional_middle(&mut self) -> ast::Exp {
+        self.eat_token(tokens::Token::QuestionMark);
+        let e = self.parse_expression(0);
+        self.eat_token(tokens::Token::Colon);
+        e
     }
 
     fn parse_exp_loop(&mut self, left: ast::Exp, next: tokens::Token, min_prec: u8) -> ast::Exp {
@@ -159,43 +199,21 @@ impl Parser {
         }
     }
 
-    /// "?" <exp> ":"
-    fn parse_conditional_middle(&mut self) -> ast::Exp {
-        self.eat_token(tokens::Token::QuestionMark);
-        let e = self.parse_expression(0);
-        self.eat_token(tokens::Token::Colon);
-        e
-    }
-
-    /// <exp> ::= <factor> | <exp> <binop> <exp>
+    /// <exp> ::= <factor> | <exp> <binop> <exp> | <exp> "?" <exp> ":" <exp>
     fn parse_expression(&mut self, min_prec: u8) -> ast::Exp {
         let initial_factor = self.parse_factor();
         let next_token = self.current_token();
         self.parse_exp_loop(initial_factor, next_token, min_prec)
     }
 
-    /// <declaration> ::= "int" <identifier> [ "=" <exp> ] ";"
-    fn parse_declaration(&mut self) -> ast::Declaration {
-        self.eat_token(tokens::Token::KWInt);
-        let var_name = self.parse_id();
-        match self.current_token() {
-            tokens::Token::Semicolon => {
-                self.eat_token(tokens::Token::Semicolon);
-                ast::Declaration {
-                    name: var_name,
-                    init: None,
-                }
-            }
-            tokens::Token::EqualSign => {
-                self.eat_token(tokens::Token::EqualSign);
-                let init = self.parse_expression(0);
-                self.eat_token(tokens::Token::Semicolon);
-                ast::Declaration {
-                    name: var_name,
-                    init: Some(init),
-                }
-            }
-            other => panic!("预期是初始化器或者分号，实际上是：{:?}", other),
+    fn parse_optional_expression(&mut self, delim: tokens::Token) -> Option<ast::Exp> {
+        if self.current_token() == delim {
+            self.eat_token(delim);
+            None
+        } else {
+            let e = self.parse_expression(0);
+            self.eat_token(delim);
+            Some(e)
         }
     }
 
@@ -343,21 +361,87 @@ impl Parser {
         ast::Block::Block(block_items)
     }
 
-    fn parse_optional_expression(&mut self, delim: tokens::Token) -> Option<ast::Exp> {
-        if self.current_token() == delim {
-            self.eat_token(delim);
-            None
-        } else {
-            let e = self.parse_expression(0);
-            self.eat_token(delim);
-            Some(e)
+    fn finish_parsing_function_declaration(&mut self, name: String) -> ast::FunctionDeclaration {
+        self.eat_token(tokens::Token::OpenParen);
+        let params = match self.current_token() {
+            tokens::Token::KWVoid => {
+                self.eat_token(tokens::Token::KWVoid);
+                vec![]
+            }
+            _ => self.parse_param_list(),
+        };
+        self.eat_token(tokens::Token::CloseParen);
+        let body = match self.current_token() {
+            tokens::Token::OpenBrace => Some(self.parse_block()),
+            tokens::Token::Semicolon => {
+                self.eat_token(tokens::Token::Semicolon);
+                None
+            }
+            other => panic!("预期是函数体或者分号，实际上是：{:?}", other),
+        };
+        ast::FunctionDeclaration {
+            name: name,
+            params: params,
+            body: body,
+        }
+    }
+
+    fn parse_param_list(&mut self) -> Vec<String> {
+        self.eat_token(tokens::Token::KWInt);
+        let next_param = self.parse_id();
+        match self.current_token() {
+            tokens::Token::Comma => {
+                self.eat_token(tokens::Token::Comma);
+                let mut result = vec![];
+                result.push(next_param);
+                result.append(&mut self.parse_param_list());
+                result
+            }
+            _ => vec![next_param],
+        }
+    }
+
+    fn finish_parsing_variable_declaration(&mut self, name: String) -> ast::VariableDeclaration {
+        match self.current_token() {
+            tokens::Token::Semicolon => ast::VariableDeclaration {
+                name: name,
+                init: None,
+            },
+            tokens::Token::EqualSign => {
+                self.eat_token(tokens::Token::EqualSign);
+                let init = self.parse_expression(0);
+                self.eat_token(tokens::Token::Semicolon);
+                ast::VariableDeclaration {
+                    name: name,
+                    init: Some(init),
+                }
+            }
+            other => panic!("预期是一个变量初始化器后者分号，实际上是：{:?}", other),
+        }
+    }
+
+    fn parse_declaration(&mut self) -> ast::Declaration {
+        self.eat_token(tokens::Token::KWInt);
+        let name = self.parse_id();
+        match self.current_token() {
+            tokens::Token::OpenParen => {
+                ast::Declaration::FunDecl(self.finish_parsing_function_declaration(name))
+            }
+            _ => ast::Declaration::VarDecl(self.finish_parsing_variable_declaration(name)),
+        }
+    }
+
+    fn parse_variable_declaration(&mut self) -> ast::VariableDeclaration {
+        match self.parse_declaration() {
+            ast::Declaration::VarDecl(vd) => vd,
+            ast::Declaration::FunDecl(_) => panic!("预期是变量声明，这里是函数声明。"),
         }
     }
 
     /// <for-init> ::= <declaration> | [ <exp> ] ";"
     fn parse_for_init(&mut self) -> ast::ForInit {
         match self.current_token() {
-            tokens::Token::KWInt => ast::ForInit::InitDecl(self.parse_declaration()),
+            tokens::Token::KWInt => ast::ForInit::InitDecl(self.parse_variable_declaration()),
             _ => {
                 let opt_e = self.parse_optional_expression(tokens::Token::Semicolon);
                 ast::ForInit::InitExp(opt_e)
@@ -366,23 +450,26 @@ impl Parser {
     }
 
     /// <function> ::= "int" <identifier> "(" "void" ")" "{" { <block-item> } "}"
-    fn parse_function_definition(&mut self) -> ast::FunctionDefinition {
-        self.eat_token(tokens::Token::KWInt); // 吃掉"int"
-        let fun_name = self.parse_id();
-        self.eat_token(tokens::Token::OpenParen); // 吃掉"("
-        self.eat_token(tokens::Token::KWVoid); // 吃掉"void"
-        self.eat_token(tokens::Token::CloseParen); // 吃掉")"
-        let body = self.parse_block();
-        ast::FunctionDefinition::Function {
-            name: fun_name,
-            body: body,
+    fn parse_function_declaration_list(&mut self) -> Vec<ast::FunctionDeclaration> {
+        match self.current_token() {
+            tokens::Token::Eof => vec![],
+            _ => {
+                let next_fun = match self.parse_declaration() {
+                    ast::Declaration::FunDecl(fd) => fd,
+                    ast::Declaration::VarDecl(_) => panic!("预期是函数声明，这里却是变量声明。"),
+                };
+                let mut result = vec![];
+                result.push(next_fun);
+                result.append(&mut self.parse_function_declaration_list());
+                result
+            }
         }
     }
 
     /// <program> ::= <function>
     pub fn parse(&mut self) -> ast::Program {
-        let fun_def = self.parse_function_definition();
-        ast::Program::FunctionDefinition(fun_def)
+        let fun_defs = self.parse_function_declaration_list();
+        ast::Program::FunctionDefinition(fun_defs)
     }
 }
 

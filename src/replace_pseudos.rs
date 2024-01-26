@@ -31,7 +31,7 @@ impl ReplacementState {
         }
     }
 
-    fn replace_pseudos_in_instructions(
+    fn replace_pseudos_in_instruction(
         &mut self,
         instruction: assembly::Instruction,
     ) -> assembly::Instruction {
@@ -67,11 +67,18 @@ impl ReplacementState {
                 let new_op = self.replace_operand(op);
                 assembly::Instruction::SetCC(code, new_op)
             }
+            assembly::Instruction::Push(op) => {
+                let new_op = self.replace_operand(op);
+                assembly::Instruction::Push(new_op)
+            }
             other @ (assembly::Instruction::Ret
             | assembly::Instruction::Cdq
             | assembly::Instruction::Label(_)
             | assembly::Instruction::JmpCC(_, _)
-            | assembly::Instruction::Jmp(_)) => other,
+            | assembly::Instruction::Jmp(_)
+            | assembly::Instruction::DeallocateStack(_)
+            | assembly::Instruction::Call(_)
+            | assembly::Instruction::AllocateStack(_)) => other,
             assembly::Instruction::AllocateStack(_) => panic!("这个时间点不能分配栈空间。"),
         }
     }
@@ -84,7 +91,7 @@ impl ReplacementState {
             assembly::FunctionDefinition::Function { name, instructions } => {
                 let mut fixup_instructions = vec![];
                 for i in instructions {
-                    fixup_instructions.push(self.replace_pseudos_in_instructions(i));
+                    fixup_instructions.push(self.replace_pseudos_in_instruction(i));
                 }
                 assembly::FunctionDefinition::Function {
                     name: name,
@@ -96,9 +103,12 @@ impl ReplacementState {
 
     pub fn replace_pseudos(&mut self, program: assembly::Program) -> assembly::Program {
         match program {
-            assembly::Program::FunctionDefinition(fn_def) => {
-                let fixed_def = self.replace_pseudos_in_function(fn_def);
-                assembly::Program::FunctionDefinition(fixed_def)
+            assembly::Program::FunctionDefinition(fn_defs) => {
+                let mut fixed_defs = vec![];
+                for fn_def in fn_defs {
+                    fixed_defs.push(self.replace_pseudos_in_function(fn_def));
+                }
+                assembly::Program::FunctionDefinition(fixed_defs)
             }
         }
     }

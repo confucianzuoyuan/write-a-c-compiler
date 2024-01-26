@@ -87,11 +87,16 @@ pub enum Instruction {
     JumpIfZero(IrValue, String),
     JumpIfNotZero(IrValue, String),
     Label(String),
+    FunCall {
+        f: String,
+        args: Vec<IrValue>,
+        dst: IrValue,
+    },
 }
 
 impl Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
+        match self {
             Instruction::Return(ref ir_value) => write!(f, "Return({})", ir_value),
             Instruction::Unary {
                 ref op,
@@ -113,6 +118,22 @@ impl Display for Instruction {
                 write!(f, "JumpIfNotZero({}, {})", cond, target)
             }
             Instruction::Label(ref label) => write!(f, "{}:", label),
+            Instruction::FunCall {
+                f: fun_name,
+                args,
+                dst,
+            } => {
+                let mut result = String::new();
+                result.push_str(format!("{} = {}(", dst, fun_name).as_str());
+                for (i, arg) in args.iter().enumerate() {
+                    if i < args.len() - 1 {
+                        result.push_str(format!("{}, ", arg).as_str());
+                    } else {
+                        result.push_str(format!("{})", arg).as_str());
+                    }
+                }
+                write!(f, "{}", result)
+            }
         }
     }
 }
@@ -121,18 +142,33 @@ impl Display for Instruction {
 pub enum FunctionDefinition {
     Function {
         name: String,
+        params: Vec<String>,
         body: Vec<Instruction>,
     },
 }
 
 impl Display for FunctionDefinition {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            FunctionDefinition::Function { ref name, ref body } => {
+        match self {
+            FunctionDefinition::Function {
+                ref name,
+                params,
+                ref body,
+            } => {
                 let mut result = String::new();
-                result.push_str(format!("{}:\n", name).as_str());
+                result.push_str(format!("{}(", name).as_str());
+                for (i, param) in params.iter().enumerate() {
+                    if i < params.len() - 1 {
+                        result.push_str(format!("{}, ", param).as_str());
+                    } else {
+                        result.push_str(format!("{}):\n", param).as_str());
+                    }
+                }
+                if params.len() == 0 {
+                    result.push_str(format!("):\n").as_str());
+                }
                 for i in body {
-                    result.push_str(format!("{}:\n", i).as_str());
+                    result.push_str(format!("{}\n", i).as_str());
                 }
                 write!(f, "{}", result)
             }
@@ -142,13 +178,19 @@ impl Display for FunctionDefinition {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Program {
-    FunctionDefinition(FunctionDefinition),
+    FunctionDefinition(Vec<FunctionDefinition>),
 }
 
 impl Display for Program {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
-            Program::FunctionDefinition(ref fn_def) => write!(f, "{}", fn_def),
+            Program::FunctionDefinition(ref fn_defs) => {
+                let mut result = String::new();
+                for fn_def in fn_defs {
+                    result.push_str(format!("{}\n", fn_def).as_str());
+                }
+                write!(f, "{}", result)
+            }
         }
     }
 }
