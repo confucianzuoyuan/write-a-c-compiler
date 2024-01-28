@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::assembly;
+use crate::{assembly, symbols};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReplacementState {
@@ -79,20 +79,23 @@ impl ReplacementState {
             | assembly::Instruction::DeallocateStack(_)
             | assembly::Instruction::Call(_)
             | assembly::Instruction::AllocateStack(_)) => other,
-            assembly::Instruction::AllocateStack(_) => panic!("这个时间点不能分配栈空间。"),
         }
     }
 
     fn replace_pseudos_in_function(
         &mut self,
         f: assembly::FunctionDefinition,
+        mut symbol_table: symbols::SymbolTable,
     ) -> assembly::FunctionDefinition {
         match f {
             assembly::FunctionDefinition::Function { name, instructions } => {
+                self.current_offset = 0;
+                self.offset_map = HashMap::new();
                 let mut fixup_instructions = vec![];
                 for i in instructions {
                     fixup_instructions.push(self.replace_pseudos_in_instruction(i));
                 }
+                symbol_table.set_bytes_required(name.clone(), self.current_offset);
                 assembly::FunctionDefinition::Function {
                     name: name,
                     instructions: fixup_instructions,
@@ -101,12 +104,16 @@ impl ReplacementState {
         }
     }
 
-    pub fn replace_pseudos(&mut self, program: assembly::Program) -> assembly::Program {
+    pub fn replace_pseudos(
+        &mut self,
+        program: assembly::Program,
+        symbol_table: symbols::SymbolTable,
+    ) -> assembly::Program {
         match program {
             assembly::Program::FunctionDefinition(fn_defs) => {
                 let mut fixed_defs = vec![];
                 for fn_def in fn_defs {
-                    fixed_defs.push(self.replace_pseudos_in_function(fn_def));
+                    fixed_defs.push(self.replace_pseudos_in_function(fn_def, symbol_table.clone()));
                 }
                 assembly::Program::FunctionDefinition(fixed_defs)
             }

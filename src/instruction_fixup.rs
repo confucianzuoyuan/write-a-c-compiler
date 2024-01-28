@@ -64,13 +64,13 @@ fn fixup_instruction(instruction: assembly::Instruction) -> Vec<assembly::Instru
 }
 
 fn fixup_function(
-    last_stack_slot: i64,
     f: assembly::FunctionDefinition,
     symbol_table: HashMap<String, symbols::Entry>,
 ) -> assembly::FunctionDefinition {
     match f {
         assembly::FunctionDefinition::Function { name, instructions } => {
             let stack_bytes = -symbol_table.get(&name).unwrap().stack_frame_size;
+            println!("stack_bytes: {}", stack_bytes);
             let mut _instructions = vec![assembly::Instruction::AllocateStack(
                 rounding::round_way_from_zero(16, stack_bytes),
             )];
@@ -86,15 +86,14 @@ fn fixup_function(
 }
 
 pub fn fixup_program(
-    last_stack_slot: i64,
     program: assembly::Program,
-    symbol_table: HashMap<String, symbols::Entry>,
+    symbol_table: symbols::SymbolTable,
 ) -> assembly::Program {
     match program {
         assembly::Program::FunctionDefinition(fn_defs) => {
             let mut fixed_functions = vec![];
             for fn_def in fn_defs {
-                fixed_functions.push(fixup_function(last_stack_slot, fn_def, symbol_table.clone()));
+                fixed_functions.push(fixup_function(fn_def, symbol_table.symbol_table.clone()));
             }
             assembly::Program::FunctionDefinition(fixed_functions)
         }

@@ -60,7 +60,7 @@ fn convert_function_call(
     let mut reg_args = vec![];
     let mut stack_args = vec![];
     for (i, arg) in args.iter().enumerate() {
-        if i <= 6 {
+        if i < 6 {
             reg_args.push(arg.clone());
         } else {
             stack_args.push(arg.clone());
@@ -248,8 +248,8 @@ fn pass_params(param_list: Vec<String>) -> Vec<assembly::Instruction> {
 
 fn convert_function(f: ir::FunctionDefinition) -> assembly::FunctionDefinition {
     match f {
-        ir::FunctionDefinition::Function { name, params: _, body } => {
-            let mut instructions = vec![];
+        ir::FunctionDefinition::Function { name, params, body } => {
+            let mut instructions = pass_params(params);
             for instruction in body {
                 instructions.append(&mut convert_instruction(instruction));
             }

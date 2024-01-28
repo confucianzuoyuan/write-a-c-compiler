@@ -94,7 +94,7 @@ impl TypeCheck {
             ast::Statement::While {
                 condition,
                 body,
-                id,
+                id: _,
             } => {
                 self.typecheck_exp(condition);
                 self.typecheck_statement(*body);
