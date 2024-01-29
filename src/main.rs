@@ -1,21 +1,23 @@
-mod lexer;
-mod tokens;
-mod parser;
+use std::borrow::{Borrow, BorrowMut};
+
+mod assembly;
 mod ast;
-mod unique_ids;
+mod codegen;
+mod emit;
+mod identifier_resolution;
+mod instruction_fixup;
 mod ir;
 mod ir_gen;
-mod assembly;
-mod codegen;
-mod instruction_fixup;
-mod replace_pseudos;
-mod identifier_resolution;
 mod label_loops;
-mod typecheck;
-mod symbols;
-mod types;
-mod emit;
+mod lexer;
+mod parser;
+mod replace_pseudos;
 mod rounding;
+mod symbols;
+mod tokens;
+mod typecheck;
+mod types;
+mod unique_ids;
 
 fn main() {
     let program = "
@@ -38,17 +40,21 @@ fn main() {
     println!("resolved_ast: {:?}", resolved_ast);
     let validated_ast = label_loops::label_loops(resolved_ast);
     println!("validated_ast: {:?}", validated_ast);
-    let mut type_check = typecheck::TypeCheck::new();
-    type_check.typecheck(validated_ast.clone());
+    typecheck::typecheck(validated_ast.clone());
     let ir = ir_gen::gen(validated_ast);
     println!("{:?}", ir);
     println!("{}", ir);
     let asm_ast = codegen::gen(ir);
+    println!("================= asm_ast =====================\r\n");
     emit::emit(asm_ast.clone());
+    println!("================= asm_ast =====================\r\n");
     let mut replacement_state = replace_pseudos::ReplacementState::new();
-    let asm_ast1 = replacement_state.replace_pseudos(asm_ast, type_check.symbol_table.clone());
-    println!("asm_ast1: {:?}", asm_ast1);
-    let asm_ast2 = instruction_fixup::fixup_program( asm_ast1, type_check.symbol_table);
-    println!("asm_ast2: {:?}", asm_ast2);
+    let asm_ast1 = replacement_state.replace_pseudos(asm_ast);
+    // let symbol_table = symbol_table.clone();
+    println!("================= asm_ast1 =====================\r\n");
+    emit::emit(asm_ast1.clone());
+    println!("================= asm_ast1 =====================\r\n");
+    // println!("symbol_table: {:?}", symbol_table);
+    let asm_ast2 = instruction_fixup::fixup_program(asm_ast1);
     emit::emit(asm_ast2);
 }
