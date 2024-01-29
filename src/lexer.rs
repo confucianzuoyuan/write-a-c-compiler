@@ -37,17 +37,6 @@ impl<R: Read> Lexer<R> {
         }
     }
 
-    fn eat(&mut self, ch: u8) {
-        if self.current_char().unwrap() != ch {
-            panic!(
-                "预期字符是: `{}`, 但是当前字符是: `{}`。",
-                ch,
-                self.current_char().unwrap()
-            );
-        }
-        self.advance()
-    }
-
     fn save_start(&mut self) {
         self.saved_pos = self.current_pos();
     }

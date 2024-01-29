@@ -40,11 +40,6 @@ pub fn get_opt(name: String) -> Option<Entry> {
     }
 }
 
-pub fn is_defined(name: String) -> bool {
-    let mut _map = SYMBOL_TABLE.lock().unwrap();
-    _map.contains_key(&name)
-}
-
 pub fn set_bytes_required(name: String, bytes_required: i64) {
     let mut _map = SYMBOL_TABLE.lock().unwrap();
     let entry = _map.get(&name).unwrap();

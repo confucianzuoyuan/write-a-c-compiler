@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::{assembly, rounding, symbols};
 
 fn fixup_instruction(instruction: assembly::Instruction) -> Vec<assembly::Instruction> {
