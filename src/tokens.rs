@@ -12,6 +12,8 @@ pub enum Token {
     KWFor,
     KWBreak,
     KWContinue,
+    KWStatic,
+    KWExtern,
     OpenParen,
     CloseParen,
     OpenBrace,

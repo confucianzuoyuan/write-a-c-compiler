@@ -1,7 +1,7 @@
 use crate::{
     ast,
     ir::{self, IrValue},
-    lexer, parser, unique_ids,
+    lexer, parser, symbols, unique_ids,
 };
 
 fn break_label(id: String) -> String {
@@ -254,6 +254,7 @@ fn emit_var_declaration(vd: ast::VariableDeclaration) -> Vec<ir::Instruction> {
         ast::VariableDeclaration {
             name,
             init: Some(e),
+            storage_class: _,
         } => {
             let (eval_assignment, _) = emit_ir_for_exp(ast::Exp::Assignment(
                 Box::new(ast::Exp::Var(name)),
@@ -264,6 +265,7 @@ fn emit_var_declaration(vd: ast::VariableDeclaration) -> Vec<ir::Instruction> {
         ast::VariableDeclaration {
             name: _,
             init: None,
+            storage_class: _,
         } => vec![],
     }
 }
@@ -401,99 +403,72 @@ fn emit_fun_call(f: String, args: Vec<ast::Exp>) -> (Vec<ir::Instruction>, IrVal
     (arg_instructions, dst)
 }
 
-fn emit_fun_declaration(fn_def: ast::FunctionDeclaration) -> Option<ir::FunctionDefinition> {
-    match fn_def.body {
-        Some(ast::Block::Block(block_items)) => {
+fn emit_fun_declaration(fd: ast::Declaration) -> Option<ir::TopLevel> {
+    match fd {
+        ast::Declaration::FunDecl(ast::FunctionDeclaration {
+            name,
+            params,
+            body: Some(ast::Block::Block(block_items)),
+            storage_class: _,
+        }) => {
+            let global = symbols::is_global(name.clone());
             let mut body_instructions = vec![];
-            for item in block_items {
-                body_instructions.append(&mut emit_ir_for_block_item(item));
+            for i in block_items {
+                body_instructions.append(&mut emit_ir_for_block_item(i));
             }
             let extra_return = ir::Instruction::Return(ir::IrValue::Constant(0));
             body_instructions.push(extra_return);
-            Some(ir::FunctionDefinition::Function {
-                name: fn_def.name,
-                params: fn_def.params,
+            Some(ir::TopLevel::Function {
+                name: name,
+                global: global,
+                params: params,
                 body: body_instructions,
             })
         }
-        None => None,
+        _ => None,
     }
 }
 
-pub fn gen(program: ast::Program) -> ir::Program {
+fn convert_symbols_to_ir(all_symbols: Vec<(String, symbols::Entry)>) -> Vec<ir::TopLevel> {
+    let mut arr = vec![];
+    for (name, entry) in all_symbols {
+        let symbol_ir = match entry.attrs {
+            symbols::IdentifierAttrs::StaticAttr { init, global } => match init {
+                symbols::InitialValue::Initial(i) => Some(ir::TopLevel::StaticVariable {
+                    name: name,
+                    global: global,
+                    init: i,
+                }),
+                symbols::InitialValue::Tentative => Some(ir::TopLevel::StaticVariable {
+                    name: name,
+                    global: global,
+                    init: 0,
+                }),
+                symbols::InitialValue::NoInitializer => None,
+            },
+            _ => None,
+        };
+        if let Some(_symbol_ir) = symbol_ir {
+            arr.push(_symbol_ir);
+        }
+    }
+    arr
+}
+
+pub fn gen(program: ast::T) -> ir::T {
     match program {
-        ast::Program::FunctionDefinition(fn_defs) => {
+        ast::T::Program(decls) => {
             let mut ir_fn_defs = vec![];
-            for fn_def in fn_defs {
+            for fn_def in decls {
                 if let Some(fn_def_ir) = emit_fun_declaration(fn_def) {
                     ir_fn_defs.push(fn_def_ir);
                 }
             }
-            ir::Program::FunctionDefinition(ir_fn_defs)
+            let mut ir_var_defs = convert_symbols_to_ir(symbols::bindings());
+            let mut result = vec![];
+            result.append(&mut ir_fn_defs);
+            result.append(&mut ir_var_defs);
+            ir::T::Program(result)
         }
     }
-}
-
-#[test]
-fn test_1() {
-    let prog = "
-    int main(void) {
-        return 1 + 2 * 3;
-    }
-    ";
-    let mut lexer = lexer::Lexer::new(prog.as_bytes());
-    let tokens = lexer.lex();
-    let mut parser = parser::Parser::new(tokens);
-    let ast = parser.parse();
-    println!("{:?}", ast);
-    let ir = gen(ast);
-    println!("{}", ir);
-}
-
-#[test]
-fn test_2() {
-    let prog = "
-    int main(void) {
-        return 0 <= 2;
-    }
-    ";
-    let mut lexer = lexer::Lexer::new(prog.as_bytes());
-    let tokens = lexer.lex();
-    let mut parser = parser::Parser::new(tokens);
-    let ast = parser.parse();
-    println!("{:?}", ast);
-    let ir = gen(ast);
-    println!("{}", ir);
-}
-
-#[test]
-fn test_3() {
-    let prog = "
-    int main(void) {
-        return 1 || 0;
-    }
-    ";
-    let mut lexer = lexer::Lexer::new(prog.as_bytes());
-    let tokens = lexer.lex();
-    let mut parser = parser::Parser::new(tokens);
-    let ast = parser.parse();
-    println!("{:?}", ast);
-    let ir = gen(ast);
-    println!("{}", ir);
-}
-
-#[test]
-fn test_4() {
-    let prog = "
-    int main(void) {
-        return 2 == 2 || 0;
-    }
-    ";
-    let mut lexer = lexer::Lexer::new(prog.as_bytes());
-    let tokens = lexer.lex();
-    let mut parser = parser::Parser::new(tokens);
-    let ast = parser.parse();
-    println!("{:?}", ast);
-    let ir = gen(ast);
-    println!("{}", ir);
 }

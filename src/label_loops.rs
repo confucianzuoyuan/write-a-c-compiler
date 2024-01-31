@@ -86,27 +86,29 @@ fn label_block(current_label: Option<String>, b: ast::Block) -> ast::Block {
     }
 }
 
-fn label_function_def(f: ast::FunctionDeclaration) -> ast::FunctionDeclaration {
+fn label_decl(f: ast::Declaration) -> ast::Declaration {
     match f {
-        ast::FunctionDeclaration { name, params, body } => ast::FunctionDeclaration {
-            name: name,
-            params: params,
-            body: match body {
+        ast::Declaration::FunDecl(fd) => ast::Declaration::FunDecl(ast::FunctionDeclaration {
+            name: fd.name,
+            params: fd.params,
+            body: match fd.body {
                 Some(_body) => Some(label_block(None, _body)),
                 None => None,
             },
-        },
+            storage_class: fd.storage_class,
+        }),
+        var_decl => var_decl,
     }
 }
 
-pub fn label_loops(program: ast::Program) -> ast::Program {
+pub fn label_loops(program: ast::T) -> ast::T {
     match program {
-        ast::Program::FunctionDefinition(fn_defs) => {
+        ast::T::Program(decls) => {
             let mut arr = vec![];
-            for fn_def in fn_defs {
-                arr.push(label_function_def(fn_def));
+            for decl in decls {
+                arr.push(label_decl(decl));
             }
-            ast::Program::FunctionDefinition(arr)
+            ast::T::Program(arr)
         }
     }
 }

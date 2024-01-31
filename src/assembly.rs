@@ -17,6 +17,7 @@ pub enum Operand {
     Reg(Reg),
     Pseudo(String),
     Stack(i64),
+    Data(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -66,14 +67,20 @@ pub enum Instruction {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum FunctionDefinition {
+pub enum TopLevel {
     Function {
         name: String,
+        global: bool,
         instructions: Vec<Instruction>,
+    },
+    StaticVariable {
+        name: String,
+        global: bool,
+        init: i64,
     },
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Program {
-    FunctionDefinition(Vec<FunctionDefinition>),
+pub enum T {
+    Program(Vec<TopLevel>),
 }

@@ -67,6 +67,8 @@ impl<R: Read> Lexer<R> {
             "while" => tokens::Token::KWWhile,
             "break" => tokens::Token::KWBreak,
             "continue" => tokens::Token::KWContinue,
+            "extern" => tokens::Token::KWExtern,
+            "static" => tokens::Token::KWStatic,
             _ => tokens::Token::Identifier(buffer),
         };
         token

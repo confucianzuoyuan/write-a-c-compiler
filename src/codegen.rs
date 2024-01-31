@@ -246,29 +246,40 @@ fn pass_params(param_list: Vec<String>) -> Vec<assembly::Instruction> {
     instructions
 }
 
-fn convert_function(f: ir::FunctionDefinition) -> assembly::FunctionDefinition {
-    match f {
-        ir::FunctionDefinition::Function { name, params, body } => {
+fn convert_top_level(top_level: ir::TopLevel) -> assembly::TopLevel {
+    match top_level {
+        ir::TopLevel::Function {
+            name,
+            global,
+            params,
+            body,
+        } => {
             let mut instructions = pass_params(params);
-            for instruction in body {
-                instructions.append(&mut convert_instruction(instruction));
+            for i in body {
+                instructions.append(&mut convert_instruction(i));
             }
-            assembly::FunctionDefinition::Function {
+            assembly::TopLevel::Function {
                 name: name,
+                global: global,
                 instructions: instructions,
             }
         }
+        ir::TopLevel::StaticVariable { name, global, init } => assembly::TopLevel::StaticVariable {
+            name: name,
+            global: global,
+            init: init,
+        },
     }
 }
 
-pub fn gen(program: ir::Program) -> assembly::Program {
+pub fn gen(program: ir::T) -> assembly::T {
     match program {
-        ir::Program::FunctionDefinition(fn_defs) => {
-            let mut arr = vec![];
-            for fn_def in fn_defs {
-                arr.push(convert_function(fn_def));
+        ir::T::Program(top_levels) => {
+            let mut tls = vec![];
+            for top_level in top_levels {
+                tls.push(convert_top_level(top_level));
             }
-            assembly::Program::FunctionDefinition(arr)
+            assembly::T::Program(tls)
         }
     }
 }

@@ -139,23 +139,33 @@ impl Display for Instruction {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum FunctionDefinition {
+pub enum TopLevel {
     Function {
         name: String,
+        global: bool,
         params: Vec<String>,
         body: Vec<Instruction>,
     },
+    StaticVariable {
+        name: String,
+        global: bool,
+        init: i64,
+    },
 }
 
-impl Display for FunctionDefinition {
+impl Display for TopLevel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FunctionDefinition::Function {
+            TopLevel::Function {
                 ref name,
+                global,
                 params,
                 ref body,
             } => {
                 let mut result = String::new();
+                if *global {
+                    result.push_str("global ");
+                }
                 result.push_str(format!("{}(", name).as_str());
                 for (i, param) in params.iter().enumerate() {
                     if i < params.len() - 1 {
@@ -172,22 +182,30 @@ impl Display for FunctionDefinition {
                 }
                 write!(f, "{}", result)
             }
+            TopLevel::StaticVariable { name, global, init } => {
+                let mut result = String::new();
+                if *global {
+                    result.push_str("global ");
+                }
+                result.push_str(format!("{} = {}", name, init).as_str());
+                write!(f, "{}", result)
+            }
         }
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Program {
-    FunctionDefinition(Vec<FunctionDefinition>),
+pub enum T {
+    Program(Vec<TopLevel>),
 }
 
-impl Display for Program {
+impl Display for T {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            Program::FunctionDefinition(ref fn_defs) => {
+        match self {
+            T::Program(top_levels) => {
                 let mut result = String::new();
-                for fn_def in fn_defs {
-                    result.push_str(format!("{}\n", fn_def).as_str());
+                for top_level in top_levels {
+                    result.push_str(format!("{}\n", top_level).as_str());
                 }
                 write!(f, "{}", result)
             }

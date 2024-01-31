@@ -19,12 +19,16 @@ impl ReplacementState {
     fn replace_operand(&mut self, operand: assembly::Operand) -> assembly::Operand {
         match operand {
             assembly::Operand::Pseudo(s) => {
-                if let Some(offset) = self.offset_map.get(&s) {
-                    assembly::Operand::Stack(*offset)
+                if symbols::is_static(s.clone()) {
+                    assembly::Operand::Data(s)
                 } else {
-                    self.current_offset = self.current_offset - 4;
-                    self.offset_map.insert(s, self.current_offset);
-                    assembly::Operand::Stack(self.current_offset)
+                    if let Some(offset) = self.offset_map.get(&s) {
+                        assembly::Operand::Stack(*offset)
+                    } else {
+                        self.current_offset = self.current_offset - 4;
+                        self.offset_map.insert(s, self.current_offset);
+                        assembly::Operand::Stack(self.current_offset)
+                    }
                 }
             }
             other => other,
@@ -82,12 +86,13 @@ impl ReplacementState {
         }
     }
 
-    fn replace_pseudos_in_function(
-        &mut self,
-        f: assembly::FunctionDefinition,
-    ) -> assembly::FunctionDefinition {
+    fn replace_pseudos_in_tl(&mut self, f: assembly::TopLevel) -> assembly::TopLevel {
         match f {
-            assembly::FunctionDefinition::Function { name, instructions } => {
+            assembly::TopLevel::Function {
+                name,
+                global,
+                instructions,
+            } => {
                 self.current_offset = 0;
                 self.offset_map = HashMap::new();
                 let mut fixup_instructions = vec![];
@@ -95,22 +100,24 @@ impl ReplacementState {
                     fixup_instructions.push(self.replace_pseudos_in_instruction(i));
                 }
                 symbols::set_bytes_required(name.clone(), self.current_offset);
-                assembly::FunctionDefinition::Function {
+                assembly::TopLevel::Function {
                     name: name,
+                    global: global,
                     instructions: fixup_instructions,
                 }
             }
+            static_var => static_var,
         }
     }
 
-    pub fn replace_pseudos(&mut self, program: assembly::Program) -> assembly::Program {
+    pub fn replace_pseudos(&mut self, program: assembly::T) -> assembly::T {
         match program {
-            assembly::Program::FunctionDefinition(fn_defs) => {
+            assembly::T::Program(tls) => {
                 let mut fixed_defs = vec![];
-                for fn_def in fn_defs {
-                    fixed_defs.push(self.replace_pseudos_in_function(fn_def));
+                for tl in tls {
+                    fixed_defs.push(self.replace_pseudos_in_tl(tl));
                 }
-                assembly::Program::FunctionDefinition(fixed_defs)
+                assembly::T::Program(fixed_defs)
             }
         }
     }

@@ -89,36 +89,44 @@ fn resolve_exp(id_map: HashMap<String, VarEntry>, exp: ast::Exp) -> ast::Exp {
 fn resolve_local_var_helper(
     id_map: HashMap<String, VarEntry>,
     name: String,
+    storage_class: Option<ast::StorageClass>,
 ) -> (HashMap<String, VarEntry>, String) {
     match id_map.get(&name) {
         Some(VarEntry {
             unique_name: _,
             from_current_scope: true,
-            has_linkage: _,
+            has_linkage,
         }) => {
-            panic!("变量重复声明。");
+            if !(*has_linkage && storage_class == Some(ast::StorageClass::Extern)) {
+                panic!("变量重复声明。");
+            }
         }
-        _ => {
-            let unique_name = unique_ids::make_label(name.clone());
-            let mut new_map = id_map.clone();
-            new_map.insert(
-                name,
-                VarEntry {
-                    unique_name: unique_name.clone(),
-                    from_current_scope: true,
-                    has_linkage: false,
-                },
-            );
-            (new_map, unique_name)
+        _ => (),
+    };
+    let entry = if storage_class == Some(ast::StorageClass::Extern) {
+        VarEntry {
+            unique_name: name.clone(),
+            from_current_scope: true,
+            has_linkage: false,
         }
-    }
+    } else {
+        let unique_name = unique_ids::make_label(name.clone());
+        VarEntry {
+            unique_name: unique_name,
+            from_current_scope: true,
+            has_linkage: false,
+        }
+    };
+    let mut new_map = id_map.clone();
+    new_map.insert(name, entry.clone());
+    (new_map, entry.unique_name)
 }
 
 fn resolve_local_var_declaration(
     id_map: HashMap<String, VarEntry>,
     vd: ast::VariableDeclaration,
 ) -> (HashMap<String, VarEntry>, ast::VariableDeclaration) {
-    let (new_map, unique_name) = resolve_local_var_helper(id_map, vd.name);
+    let (new_map, unique_name) = resolve_local_var_helper(id_map, vd.name, vd.storage_class.clone());
     let resolved_init = match vd.init {
         Some(_init) => Some(resolve_exp(new_map.clone(), _init)),
         None => None,
@@ -128,6 +136,7 @@ fn resolve_local_var_declaration(
         ast::VariableDeclaration {
             name: unique_name,
             init: resolved_init,
+            storage_class: vd.storage_class,
         },
     )
 }
@@ -253,8 +262,17 @@ fn resolve_local_declaration(
             name: _,
             params: _,
             body: Some(_),
+            storage_class: _,
         }) => {
             panic!("C语言不允许定义嵌套函数。");
+        }
+        ast::Declaration::FunDecl(ast::FunctionDeclaration {
+            name: _,
+            params: _,
+            body: _,
+            storage_class: Some(ast::StorageClass::Static),
+        }) => {
+            panic!("static keyword not allowed on local function declarations.")
         }
         ast::Declaration::FunDecl(fd) => {
             let (new_map, resolved_fd) = resolve_function_declaration(id_map, fd);
@@ -270,7 +288,7 @@ fn resolve_params(
     let mut new_map = id_map.clone();
     let mut resolved_params = vec![];
     for param in params {
-        let t = resolve_local_var_helper(new_map, param);
+        let t = resolve_local_var_helper(new_map, param, None);
         new_map = t.0;
         resolved_params.push(t.1);
     }
@@ -309,23 +327,56 @@ fn resolve_function_declaration(
                     name: f.name,
                     params: resolved_params,
                     body: resolved_body,
+                    storage_class: f.storage_class,
                 },
             )
         }
     }
 }
 
-pub fn resolve(program: ast::Program) -> ast::Program {
+pub fn resolve_file_scope_variable_declaration(
+    id_map: HashMap<String, VarEntry>,
+    vd: ast::VariableDeclaration,
+) -> (HashMap<String, VarEntry>, ast::VariableDeclaration) {
+    let mut new_map = id_map.clone();
+    new_map.insert(
+        vd.name.clone(),
+        VarEntry {
+            unique_name: vd.name.clone(),
+            from_current_scope: true,
+            has_linkage: true,
+        },
+    );
+    (new_map, vd)
+}
+
+pub fn resolve_global_declaration(
+    id_map: HashMap<String, VarEntry>,
+    d: ast::Declaration,
+) -> (HashMap<String, VarEntry>, ast::Declaration) {
+    match d {
+        ast::Declaration::FunDecl(fd) => {
+            let (new_map, fd) = resolve_function_declaration(id_map, fd);
+            (new_map, ast::Declaration::FunDecl(fd))
+        }
+        ast::Declaration::VarDecl(vd) => {
+            let (new_map, resolved_vd) = resolve_file_scope_variable_declaration(id_map, vd);
+            (new_map, ast::Declaration::VarDecl(resolved_vd))
+        }
+    }
+}
+
+pub fn resolve(program: ast::T) -> ast::T {
     match program {
-        ast::Program::FunctionDefinition(fn_defs) => {
+        ast::T::Program(decls) => {
             let mut resolved_decls = vec![];
             let mut id_map = HashMap::new();
-            for fn_def in fn_defs {
-                let t = resolve_function_declaration(id_map, fn_def);
+            for decl in decls {
+                let t = resolve_global_declaration(id_map, decl);
                 id_map = t.0;
                 resolved_decls.push(t.1);
             }
-            ast::Program::FunctionDefinition(resolved_decls)
+            ast::T::Program(resolved_decls)
         }
     }
 }

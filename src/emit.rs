@@ -1,4 +1,24 @@
-use crate::assembly;
+use crate::{assembly, symbols};
+
+fn align_directive() -> String {
+    ".align".to_string()
+}
+
+fn show_label(name: String) -> String {
+    name
+}
+
+fn show_local_label(label: String) -> String {
+    format!(".L{}", label)
+}
+
+fn show_fun_name(f: String) -> String {
+    if symbols::is_defined(f.clone()) {
+        f
+    } else {
+        format!("{}@PLT", f)
+    }
+}
 
 fn show_reg(r: assembly::Reg) -> String {
     match r {
@@ -19,6 +39,7 @@ fn show_operand(operand: assembly::Operand) -> String {
         assembly::Operand::Reg(r) => show_reg(r),
         assembly::Operand::Imm(i) => format!("${}", i),
         assembly::Operand::Stack(i) => format!("{}(%rbp)", i),
+        assembly::Operand::Data(name) => format!("{}(%rip)", show_label(name)),
         assembly::Operand::Pseudo(name) => format!("%{}", name),
     }
 }
@@ -63,18 +84,6 @@ fn show_quadword_operand(operand: assembly::Operand) -> String {
         assembly::Operand::Reg(r) => show_quadword_reg(r),
         other => show_operand(other),
     }
-}
-
-fn show_label(name: String) -> String {
-    name
-}
-
-fn show_fun_name(f: String) -> String {
-    f
-}
-
-fn show_local_label(label: String) -> String {
-    format!(".L{}", label)
 }
 
 fn show_unary_instruction(op: assembly::UnaryOperator) -> String {
@@ -167,19 +176,54 @@ fn emit_instruction(instruction: assembly::Instruction) -> String {
     }
 }
 
-fn emit_function(f: assembly::FunctionDefinition) -> String {
+fn emit_global_directive(global: bool, label: String) -> String {
+    if global {
+        format!("\t.globl {}\n", label)
+    } else {
+        "".to_string()
+    }
+}
+
+fn emit_tl(f: assembly::TopLevel) -> String {
     match f {
-        assembly::FunctionDefinition::Function { name, instructions } => {
+        assembly::TopLevel::Function { name, global, instructions } => {
             let label = show_label(name);
-            let mut result = format!("
-\t.globl {}
+            let mut result = String::new();
+            result.push_str(&emit_global_directive(global, label.clone()));
+            result.push_str(format!(
+                "
+\t.text
 {}:
 \tpushq %rbp
 \tmovq %rsp, %rbp
-", label, label);
+",
+                label
+            ).as_str());
             for instruction in instructions {
                 result.push_str(&emit_instruction(instruction));
             }
+            result
+        }
+        assembly::TopLevel::StaticVariable { name, global, init: 0 } => {
+            let mut result = String::new();
+            let label = show_label(name);
+            result.push_str(&emit_global_directive(global, label.clone()));
+            result.push_str(format!("
+\t.bss
+\t{} 4
+{}:
+\t.zero 4", align_directive(), label).as_str());
+            result
+        }
+        assembly::TopLevel::StaticVariable { name, global, init } => {
+            let mut result = String::new();
+            let label = show_label(name);
+            result.push_str(&emit_global_directive(global, label.clone()));
+            result.push_str(format!("
+\t.data
+\t{} 4
+{}:
+\t.long {}", align_directive(), label, init).as_str());
             result
         }
     }
@@ -189,11 +233,11 @@ fn emit_stack_note() -> String {
     "\t.section .note.GNU-stack,\"\",@progbits\n".to_string()
 }
 
-pub fn emit(program: assembly::Program) {
+pub fn emit(program: assembly::T) {
     match program {
-        assembly::Program::FunctionDefinition(fn_defs) => {
-            for fn_def in fn_defs {
-                print!("{}", emit_function(fn_def));
+        assembly::T::Program(tls) => {
+            for tl in tls {
+                print!("{}", emit_tl(tl));
             }
             println!();
             print!("{}", emit_stack_note());
