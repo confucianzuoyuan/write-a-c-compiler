@@ -1,4 +1,4 @@
-use crate::{ast, lexer, tokens, types};
+use crate::{ast, tokens, types};
 
 pub struct Parser {
     tokens: Vec<tokens::Token>,

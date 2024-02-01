@@ -1,7 +1,7 @@
 use crate::{
     ast,
     ir::{self, IrValue},
-    lexer, parser, symbols, unique_ids,
+    symbols, unique_ids,
 };
 
 fn break_label(id: String) -> String {

@@ -19,6 +19,7 @@ mod unique_ids;
 
 fn main() {
     let program = "
+    static int i = 0;
     int add(int a, int b) {
         return a + b;
     }
