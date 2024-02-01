@@ -19,14 +19,11 @@ mod unique_ids;
 
 fn main() {
     let program = "
-    static int i = 0;
-    int add(int a, int b) {
-        return a + b;
-    }
+    int a = 3;
+    int b = 4;
     
     int main(void) {
-        int sum = add(1 + 2, 4);
-        return sum + sum;
+        return a * b;
     }
     ";
     let mut lexer = lexer::Lexer::new(program.as_bytes());
