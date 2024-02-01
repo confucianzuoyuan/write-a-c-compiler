@@ -223,7 +223,7 @@ fn emit_tl(f: assembly::TopLevel) -> String {
 \t.data
 \t{} 4
 {}:
-\t.long {}", align_directive(), label, init).as_str());
+\t.long {}\n", align_directive(), label, init).as_str());
             result
         }
     }
