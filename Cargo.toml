@@ -1,5 +1,5 @@
 [package]
-name = "nqcc2-rs"
+name = "wacc"
 version = "0.1.0"
 edition = "2021"
 
