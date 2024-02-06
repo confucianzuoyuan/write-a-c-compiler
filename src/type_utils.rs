@@ -4,7 +4,7 @@ pub fn get_type(t: ast::TypedExp) -> types::Type {
     t.t
 }
 
-pub fn set_type(e: ast::Exp, new_type: types::Type) -> ast::TypedExp {
+pub fn set_type(e: ast::TypedInnerExp, new_type: types::Type) -> ast::TypedExp {
     ast::TypedExp { e: e, t: new_type }
 }
 

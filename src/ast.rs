@@ -130,7 +130,7 @@ pub enum UnTypedExp {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum InnerExp {
+pub enum TypedInnerExp {
     Constant(constants::T),
     Var(String),
     Cast {
@@ -153,6 +153,6 @@ pub enum InnerExp {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TypedExp {
-    e: Box<InnerExp>,
-    t: types::Type,
+    pub e: Box<TypedInnerExp>,
+    pub t: types::Type,
 }

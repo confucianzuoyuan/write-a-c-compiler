@@ -2,15 +2,15 @@ use std::process::id;
 
 use crate::{ast, const_convert, constants, initializers, symbols, type_utils, types};
 
-pub fn convert_to(e: Box<ast::Exp>, target_type: types::Type) -> ast::TypedExp {
-    let cast = ast::Exp::Cast {
+pub fn convert_to(e: ast::TypedExp, target_type: types::Type) -> ast::TypedExp {
+    let cast = ast::TypedInnerExp::Cast {
         target_type: target_type,
         e: e,
     };
     type_utils::set_type(cast, target_type)
 }
 
-pub fn get_comman_type(t1: types::Type, t2: types::Type) -> types::Type {
+pub fn get_common_type(t1: types::Type, t2: types::Type) -> types::Type {
     if t1 == t2 {
         t1
     } else {
@@ -20,7 +20,7 @@ pub fn get_comman_type(t1: types::Type, t2: types::Type) -> types::Type {
 
 pub fn typecheck_var(v: String) -> ast::TypedExp {
     let v_type = symbols::get(v).t;
-    let e = ast::Exp::Var(v);
+    let e = ast::TypedInnerExp::Var(v);
     match v_type {
         types::Type::FunType {
             param_types: _,
@@ -31,64 +31,64 @@ pub fn typecheck_var(v: String) -> ast::TypedExp {
 }
 
 pub fn typecheck_const(c: constants::T) -> ast::TypedExp {
-    let e = ast::Exp::Constant(c);
+    let e = ast::TypedInnerExp::Constant(c);
     match c {
         constants::T::ConstInt(_) => type_utils::set_type(e, types::Type::Int),
         constants::T::ConstLong(_) => type_utils::set_type(e, types::Type::Long),
     }
 }
 
-pub fn typecheck_exp(exp: ast::Exp) -> ast::TypedExp {
+pub fn typecheck_exp(exp: ast::UnTypedExp) -> ast::TypedExp {
     match exp {
-        ast::Exp::FunCall { f, args } => typecheck_fun_call(f, args),
-        ast::Exp::Var(v) => typecheck_var(v),
-        ast::Exp::Cast {
+        ast::UnTypedExp::FunCall { f, args } => typecheck_fun_call(f, args),
+        ast::UnTypedExp::Var(v) => typecheck_var(v),
+        ast::UnTypedExp::Cast {
             target_type,
             e: inner,
         } => {
-            let cast_exp = ast::Exp::Cast {
+            let cast_exp = ast::TypedInnerExp::Cast {
                 target_type: target_type,
                 e: Box::new(typecheck_exp(*inner).e),
             };
             type_utils::set_type(cast_exp, target_type)
         }
-        ast::Exp::Unary(op, inner) => typecheck_unary(op, *inner),
-        ast::Exp::Binary(op, e1, e2) => typecheck_binary(op, *e1, *e2),
-        ast::Exp::Assignment(lhs, rhs) => typecheck_assignment(*lhs, *rhs),
-        ast::Exp::Conditional {
+        ast::UnTypedExp::Unary(op, inner) => typecheck_unary(op, *inner),
+        ast::UnTypedExp::Binary(op, e1, e2) => typecheck_binary(op, *e1, *e2),
+        ast::UnTypedExp::Assignment(lhs, rhs) => typecheck_assignment(*lhs, *rhs),
+        ast::UnTypedExp::Conditional {
             condition,
             then_result,
             else_result,
         } => typecheck_conditional(*condition, *then_result, *else_result),
-        ast::Exp::Constant(c) => typecheck_const(c),
+        ast::UnTypedExp::Constant(c) => typecheck_const(c),
     }
 }
 
-pub fn typecheck_unary(op: ast::UnaryOperator, inner: ast::Exp) -> ast::TypedExp {
+pub fn typecheck_unary(op: ast::UnaryOperator, inner: ast::UnTypedExp) -> ast::TypedExp {
     let typed_inner = typecheck_exp(inner);
-    let unary_exp = ast::Exp::Unary(op, Box::new(typed_inner.e));
+    let unary_exp = ast::TypedInnerExp::Unary(op, Box::new(typed_inner.e));
     match op {
         ast::UnaryOperator::Not => type_utils::set_type(unary_exp, types::Type::Int),
         _ => type_utils::set_type(unary_exp, type_utils::get_type(typed_inner)),
     }
 }
 
-pub fn typecheck_binary(op: ast::BinaryOperator, e1: ast::Exp, e2: ast::Exp) -> ast::TypedExp {
+pub fn typecheck_binary(op: ast::BinaryOperator, e1: ast::UnTypedExp, e2: ast::UnTypedExp) -> ast::TypedExp {
     let typed_e1 = typecheck_exp(e1);
     let typed_e2 = typecheck_exp(e2);
     match op {
         ast::BinaryOperator::Add | ast::BinaryOperator::Or => {
-            let typed_binexp = ast::Exp::Binary(op, Box::new(typed_e1.e), Box::new(typed_e2.e));
+            let typed_binexp = ast::TypedInnerExp::Binary(op, Box::new(typed_e1.e), Box::new(typed_e2.e));
             type_utils::set_type(typed_binexp, types::Type::Int)
         }
         _ => {
             let t1 = type_utils::get_type(typed_e1);
             let t2 = type_utils::get_type(typed_e2);
-            let common_type = get_comman_type(t1, t2);
-            let converted_e1 = convert_to(Box::new(typed_e1.e), common_type);
-            let converted_e2 = convert_to(Box::new(typed_e2.e), common_type);
+            let common_type = get_common_type(t1, t2);
+            let converted_e1 = convert_to(typed_e1, common_type);
+            let converted_e2 = convert_to(typed_e2, common_type);
             let binary_exp =
-                ast::Exp::Binary(op, Box::new(converted_e1.e), Box::new(converted_e2.e));
+                ast::TypedInnerExp::Binary(op, Box::new(converted_e1.e), Box::new(converted_e2.e));
             match op {
                 ast::BinaryOperator::Add
                 | ast::BinaryOperator::Subtract
@@ -101,30 +101,30 @@ pub fn typecheck_binary(op: ast::BinaryOperator, e1: ast::Exp, e2: ast::Exp) -> 
     }
 }
 
-pub fn typecheck_assignment(lhs: ast::Exp, rhs: ast::Exp) -> ast::TypedExp {
+pub fn typecheck_assignment(lhs: ast::UnTypedExp, rhs: ast::UnTypedExp) -> ast::TypedExp {
     let typed_lhs = typecheck_exp(lhs);
     let lhs_type = type_utils::get_type(typed_lhs);
     let typed_rhs = typecheck_exp(rhs);
     let converted_rhs = convert_to(Box::new(typed_rhs.e), lhs_type);
-    let assign_exp = ast::Exp::Assignment(Box::new(typed_lhs.e), Box::new(converted_rhs.e));
+    let assign_exp = ast::TypedInnerExp::Assignment(Box::new(typed_lhs.e), Box::new(converted_rhs.e));
     type_utils::set_type(assign_exp, lhs_type)
 }
 
 pub fn typecheck_conditional(
-    condition: ast::Exp,
-    then_exp: ast::Exp,
-    else_exp: ast::Exp,
+    condition: ast::UnTypedExp,
+    then_exp: ast::UnTypedExp,
+    else_exp: ast::UnTypedExp,
 ) -> ast::TypedExp {
     let typed_condition = typecheck_exp(condition);
     let typed_then = typecheck_exp(then_exp);
     let typed_else = typecheck_exp(else_exp);
-    let common_type = get_comman_type(
+    let common_type = get_common_type(
         type_utils::get_type(typed_then),
         type_utils::get_type(typed_else),
     );
     let converted_then = convert_to(Box::new(typed_then.e), common_type);
     let converted_else = convert_to(Box::new(typed_else.e), common_type);
-    let conditional_exp = ast::Exp::Conditional {
+    let conditional_exp = ast::TypedInnerExp::Conditional {
         condition: Box::new(typed_condition.e),
         then_result: Box::new(converted_then.e),
         else_result: Box::new(converted_else.e),
@@ -132,7 +132,7 @@ pub fn typecheck_conditional(
     type_utils::set_type(conditional_exp, common_type)
 }
 
-pub fn typecheck_fun_call(f: String, args: Vec<ast::Exp>) -> ast::TypedExp {
+pub fn typecheck_fun_call(f: String, args: Vec<ast::UnTypedExp>) -> ast::TypedExp {
     let f_type = symbols::get(f).t;
     match f_type {
         types::Type::Int | types::Type::Long => panic!("tried to use variable as function name."),
@@ -150,7 +150,7 @@ pub fn typecheck_fun_call(f: String, args: Vec<ast::Exp>) -> ast::TypedExp {
                     *param_types[i],
                 ));
             }
-            let call_exp = ast::Exp::FunCall {
+            let call_exp = ast::TypedInnerExp::FunCall {
                 f: f,
                 args: converted_args,
             };
@@ -159,9 +159,9 @@ pub fn typecheck_fun_call(f: String, args: Vec<ast::Exp>) -> ast::TypedExp {
     }
 }
 
-pub fn to_static_init(var_type: types::Type, init: ast::Exp) -> ast::TypedExp {
+pub fn to_static_init(var_type: types::Type, init: ast::UnTypedExp) -> ast::TypedExp {
     match init {
-        ast::Exp::Constant(c) => {
+        ast::UnTypedExp::Constant(c) => {
             let init_val = match const_convert::const_convert(var_type, c) {
                 constants::T::ConstInt(i) => initializers::StaticInit::IntInit(i),
                 constants::T::ConstLong(l) => initializers::StaticInit::LongInit(l),
@@ -174,7 +174,7 @@ pub fn to_static_init(var_type: types::Type, init: ast::Exp) -> ast::TypedExp {
 
 pub fn typecheck_block(
     ret_type: types::Type,
-    b: ast::Block<ast::Exp>,
+    b: ast::Block<ast::UnTypedExp>,
 ) -> ast::Block<ast::TypedExp> {
     match b {
         ast::Block::Block(block_items) => {
@@ -188,7 +188,7 @@ pub fn typecheck_block(
 
 pub fn typecheck_block_item(
     ret_type: types::Type,
-    block_item: ast::BlockItem<ast::Exp>,
+    block_item: ast::BlockItem<ast::UnTypedExp>,
 ) -> ast::BlockItem<ast::TypedExp> {
     match block_item {
         ast::BlockItem::S(s) => typecheck_statement(ret_type, s),
@@ -198,7 +198,7 @@ pub fn typecheck_block_item(
 
 pub fn typecheck_statement(
     ret_type: types::Type,
-    statement: ast::Statement<ast::Exp>,
+    statement: ast::Statement<ast::UnTypedExp>,
 ) -> ast::Statement<ast::TypedExp> {
     match statement {
         ast::Statement::Return(e) => {
@@ -281,7 +281,7 @@ pub fn typecheck_statement(
     }
 }
 
-pub fn typecheck_local_decl(d: ast::Declaration<ast::Exp>) -> ast::Declaration<ast::TypedExp> {
+pub fn typecheck_local_decl(d: ast::Declaration<ast::UnTypedExp>) -> ast::Declaration<ast::TypedExp> {
     match d {
         ast::Declaration::VarDecl(vd) => typecheck_local_var_decl(vd),
         ast::Declaration::FunDecl(fd) => typecheck_fn_decl(fd),
@@ -289,7 +289,7 @@ pub fn typecheck_local_decl(d: ast::Declaration<ast::Exp>) -> ast::Declaration<a
 }
 
 pub fn typecheck_local_var_decl(
-    vd: ast::VariableDeclaration<ast::Exp>,
+    vd: ast::VariableDeclaration<ast::UnTypedExp>,
 ) -> ast::VariableDeclaration<ast::TypedExp> {
     match vd.storage_class {
         Some(ast::StorageClass::Extern) => {
@@ -328,7 +328,7 @@ pub fn typecheck_local_var_decl(
 }
 
 pub fn typecheck_fn_decl(
-    fd: ast::FunctionDeclaration<ast::Exp>,
+    fd: ast::FunctionDeclaration<ast::UnTypedExp>,
 ) -> ast::FunctionDeclaration<ast::TypedExp> {
     let has_body = fd.body.is_some();
     let global = fd.storage_class != Some(ast::StorageClass::Static);
@@ -380,7 +380,7 @@ pub fn typecheck_fn_decl(
 }
 
 pub fn typecheck_file_scope_var_decl(
-    vd: ast::VariableDeclaration<ast::Exp>,
+    vd: ast::VariableDeclaration<ast::UnTypedExp>,
 ) -> ast::VariableDeclaration<ast::TypedExp> {
     let current_init = match vd.init {
         Some(ast::Exp::Constant(c)) => symbols::InitialValue::Initial(c),
@@ -426,14 +426,14 @@ pub fn typecheck_file_scope_var_decl(
     symbols::add_static_var(vd.name, types::Type::Int, global, init);
 }
 
-pub fn typecheck_global_decl(d: ast::Declaration<ast::Exp>) -> ast::Declaration<ast::TypedExp> {
+pub fn typecheck_global_decl(d: ast::Declaration<ast::UnTypedExp>) -> ast::Declaration<ast::TypedExp> {
     match d {
         ast::Declaration::FunDecl(fd) => typecheck_fn_decl(fd),
         ast::Declaration::VarDecl(vd) => typecheck_file_scope_var_decl(vd),
     }
 }
 
-pub fn typecheck(program: ast::UntypedProgType) -> ast::TypedProgType {
+pub fn typecheck(program: ast::UntypedProg) -> ast::TypedProg {
     match program {
         ast::TypedProgType::Program(fn_decls) => {
             for fn_decl in fn_decls {

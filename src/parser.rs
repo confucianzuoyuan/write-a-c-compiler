@@ -126,15 +126,15 @@ impl Parser {
         }
     }
 
-    fn parse_constant(&mut self) -> ast::Exp {
+    fn parse_constant(&mut self) -> ast::UnTypedExp {
         match self.current_token() {
             tokens::Token::ConstInt(c) => {
                 self.pos += 1;
-                ast::Exp::Constant(constants::T::ConstInt(c))
+                ast::UnTypedExp::Constant(constants::T::ConstInt(c))
             }
             tokens::Token::ConstLong(c) => {
                 self.pos += 1;
-                ast::Exp::Constant(constants::T::ConstLong(c))
+                ast::UnTypedExp::Constant(constants::T::ConstLong(c))
             }
             other => panic!("预期是常数 token,实际是{:?}", other),
         }
@@ -180,7 +180,7 @@ impl Parser {
     }
 
     /// <factor> ::= <int> | <identifier> <unop> <factor> | "(" <exp> ")"
-    fn parse_factor(&mut self) -> ast::Exp {
+    fn parse_factor(&mut self) -> ast::UnTypedExp {
         match self.current_token() {
             tokens::Token::ConstInt(_) | tokens::Token::ConstLong(_) => self.parse_constant(),
             tokens::Token::Identifier(_) => {
@@ -188,15 +188,15 @@ impl Parser {
                 match self.current_token() {
                     tokens::Token::OpenParen => {
                         let args = self.parse_optional_arg_list();
-                        ast::Exp::FunCall { f: id, args: args }
+                        ast::UnTypedExp::FunCall { f: id, args: args }
                     }
-                    _ => ast::Exp::Var(id),
+                    _ => ast::UnTypedExp::Var(id),
                 }
             }
             tokens::Token::Hyphen | tokens::Token::Tilde | tokens::Token::Bang => {
                 let operator = self.parse_unop();
                 let inner_exp = self.parse_factor();
-                ast::Exp::Unary(operator, Box::new(inner_exp))
+                ast::UnTypedExp::Unary(operator, Box::new(inner_exp))
             }
             tokens::Token::OpenParen => {
                 self.eat_token(tokens::Token::OpenParen); // 吃掉"(""
@@ -212,7 +212,7 @@ impl Parser {
         }
     }
 
-    fn parse_optional_arg_list(&mut self) -> Vec<ast::Exp> {
+    fn parse_optional_arg_list(&mut self) -> Vec<ast::UnTypedExp> {
         self.eat_token(tokens::Token::OpenParen);
         let args = match self.current_token() {
             tokens::Token::CloseParen => vec![],
@@ -222,7 +222,7 @@ impl Parser {
         args
     }
 
-    fn parse_arg_list(&mut self) -> Vec<ast::Exp> {
+    fn parse_arg_list(&mut self) -> Vec<ast::UnTypedExp> {
         let arg = self.parse_expression(0);
         match self.current_token() {
             tokens::Token::Comma => {
@@ -237,27 +237,27 @@ impl Parser {
     }
 
     /// "?" <exp> ":"
-    fn parse_conditional_middle(&mut self) -> ast::Exp {
+    fn parse_conditional_middle(&mut self) -> ast::UnTypedExp {
         self.eat_token(tokens::Token::QuestionMark);
         let e = self.parse_expression(0);
         self.eat_token(tokens::Token::Colon);
         e
     }
 
-    fn parse_exp_loop(&mut self, left: ast::Exp, next: tokens::Token, min_prec: u8) -> ast::Exp {
+    fn parse_exp_loop(&mut self, left: ast::UnTypedExp, next: tokens::Token, min_prec: u8) -> ast::UnTypedExp {
         match self.get_precedence(next.clone()) {
             Some(prec) if prec >= min_prec => {
                 if next == tokens::Token::EqualSign {
                     self.eat_token(tokens::Token::EqualSign);
                     let right = self.parse_expression(prec);
-                    let left = ast::Exp::Assignment(Box::new(left), Box::new(right));
+                    let left = ast::UnTypedExp::Assignment(Box::new(left), Box::new(right));
                     let peek_token = self.current_token();
 
                     self.parse_exp_loop(left, peek_token, min_prec)
                 } else if next == tokens::Token::QuestionMark {
                     let middle = self.parse_conditional_middle();
                     let right = self.parse_expression(prec);
-                    let left = ast::Exp::Conditional {
+                    let left = ast::UnTypedExp::Conditional {
                         condition: Box::new(left),
                         then_result: Box::new(middle),
                         else_result: Box::new(right),
@@ -267,7 +267,7 @@ impl Parser {
                 } else {
                     let operator = self.parse_binop();
                     let right = self.parse_expression(prec + 1);
-                    let left = ast::Exp::Binary(operator, Box::new(left), Box::new(right));
+                    let left = ast::UnTypedExp::Binary(operator, Box::new(left), Box::new(right));
                     let peek_token = self.current_token();
                     self.parse_exp_loop(left, peek_token, min_prec)
                 }
@@ -277,13 +277,13 @@ impl Parser {
     }
 
     /// <exp> ::= <factor> | <exp> <binop> <exp> | <exp> "?" <exp> ":" <exp>
-    fn parse_expression(&mut self, min_prec: u8) -> ast::Exp {
+    fn parse_expression(&mut self, min_prec: u8) -> ast::UnTypedExp {
         let initial_factor = self.parse_factor();
         let next_token = self.current_token();
         self.parse_exp_loop(initial_factor, next_token, min_prec)
     }
 
-    fn parse_optional_expression(&mut self, delim: tokens::Token) -> Option<ast::Exp> {
+    fn parse_optional_expression(&mut self, delim: tokens::Token) -> Option<ast::UnTypedExp> {
         if self.current_token() == delim {
             self.eat_token(delim);
             None
@@ -304,7 +304,7 @@ impl Parser {
     ///               | "do" <statement> "while" "(" <exp> ")" ";"
     ///               | "for" "(" <for-init> [ <exp> ] ";" [ <exp> ] ")" <statement>
     ///               | ";"
-    fn parse_statement(&mut self) -> ast::Statement<ast::Exp> {
+    fn parse_statement(&mut self) -> ast::Statement<ast::UnTypedExp> {
         match self.current_token() {
             tokens::Token::KWIf => self.parse_if_statement(),
             tokens::Token::OpenBrace => ast::Statement::Compound(self.parse_block()),
@@ -338,7 +338,7 @@ impl Parser {
     }
 
     /// "if" "(" <exp> ")" <statement> [ "else" <statement> ]
-    fn parse_if_statement(&mut self) -> ast::Statement<ast::Exp> {
+    fn parse_if_statement(&mut self) -> ast::Statement<ast::UnTypedExp> {
         self.eat_token(tokens::Token::KWIf);
         self.eat_token(tokens::Token::OpenParen);
         let condition = self.parse_expression(0);
@@ -362,7 +362,7 @@ impl Parser {
     }
 
     /// "do" <statement> "while" "(" <exp> ")" ";"
-    fn parse_do_loop(&mut self) -> ast::Statement<ast::Exp> {
+    fn parse_do_loop(&mut self) -> ast::Statement<ast::UnTypedExp> {
         self.eat_token(tokens::Token::KWDo);
         let body = self.parse_statement();
         self.eat_token(tokens::Token::KWWhile);
@@ -378,7 +378,7 @@ impl Parser {
     }
 
     /// "while" "(" <exp> ")" <statement>
-    fn parse_while_loop(&mut self) -> ast::Statement<ast::Exp> {
+    fn parse_while_loop(&mut self) -> ast::Statement<ast::UnTypedExp> {
         self.eat_token(tokens::Token::KWWhile);
         self.eat_token(tokens::Token::OpenParen);
         let condition = self.parse_expression(0);
@@ -392,7 +392,7 @@ impl Parser {
     }
 
     /// "for" "(" <for-init> [ <exp> ] ";" [ <exp> ] ")" <statement>
-    fn parse_for_loop(&mut self) -> ast::Statement<ast::Exp> {
+    fn parse_for_loop(&mut self) -> ast::Statement<ast::UnTypedExp> {
         self.eat_token(tokens::Token::KWFor);
         self.eat_token(tokens::Token::OpenParen);
         let init = self.parse_for_init();
@@ -409,7 +409,7 @@ impl Parser {
     }
 
     /// <block-item> ::= <statement> | <declaration>
-    fn parse_block_item(&mut self) -> ast::BlockItem<ast::Exp> {
+    fn parse_block_item(&mut self) -> ast::BlockItem<ast::UnTypedExp> {
         match self.current_token() {
             tokens::Token::KWInt | tokens::Token::KWStatic | tokens::Token::KWExtern => {
                 ast::BlockItem::D(self.parse_declaration())
@@ -418,7 +418,7 @@ impl Parser {
         }
     }
 
-    fn parse_block_item_list(&mut self) -> Vec<ast::BlockItem<ast::Exp>> {
+    fn parse_block_item_list(&mut self) -> Vec<ast::BlockItem<ast::UnTypedExp>> {
         match self.current_token() {
             tokens::Token::CloseBrace => {
                 vec![]
@@ -433,7 +433,7 @@ impl Parser {
     }
 
     /// <block> ::= "{" { <block-item> } "}"
-    fn parse_block(&mut self) -> ast::Block<ast::Exp> {
+    fn parse_block(&mut self) -> ast::Block<ast::UnTypedExp> {
         self.eat_token(tokens::Token::OpenBrace);
         let block_items = self.parse_block_item_list();
         self.eat_token(tokens::Token::CloseBrace);
@@ -445,7 +445,7 @@ impl Parser {
         ret_type: types::Type,
         storage_class: Option<ast::StorageClass>,
         name: String,
-    ) -> ast::FunctionDeclaration<ast::Exp> {
+    ) -> ast::FunctionDeclaration<ast::UnTypedExp> {
         self.eat_token(tokens::Token::OpenParen);
         let params_with_types = match self.current_token() {
             tokens::Token::KWVoid => {
@@ -503,7 +503,7 @@ impl Parser {
         var_type: types::Type,
         storage_class: Option<ast::StorageClass>,
         name: String,
-    ) -> ast::VariableDeclaration<ast::Exp> {
+    ) -> ast::VariableDeclaration<ast::UnTypedExp> {
         match self.current_token() {
             tokens::Token::Semicolon => ast::VariableDeclaration {
                 name: name,
@@ -526,7 +526,7 @@ impl Parser {
         }
     }
 
-    fn parse_declaration(&mut self) -> ast::Declaration<ast::Exp> {
+    fn parse_declaration(&mut self) -> ast::Declaration<ast::UnTypedExp> {
         let specifiers = self.parse_specifier_list();
         let (_typ, storage_class) = self.parse_type_and_storage_class(specifiers);
         let name = self.parse_id();
@@ -540,7 +540,7 @@ impl Parser {
         }
     }
 
-    fn parse_variable_declaration(&mut self) -> ast::VariableDeclaration<ast::Exp> {
+    fn parse_variable_declaration(&mut self) -> ast::VariableDeclaration<ast::UnTypedExp> {
         match self.parse_declaration() {
             ast::Declaration::VarDecl(vd) => vd,
             ast::Declaration::FunDecl(_) => panic!("预期是变量声明，这里是函数声明。"),
@@ -548,7 +548,7 @@ impl Parser {
     }
 
     /// <for-init> ::= <declaration> | [ <exp> ] ";"
-    fn parse_for_init(&mut self) -> ast::ForInit<ast::Exp> {
+    fn parse_for_init(&mut self) -> ast::ForInit<ast::UnTypedExp> {
         match self.current_token() {
             tokens::Token::KWInt | tokens::Token::KWStatic | tokens::Token::KWExtern => {
                 ast::ForInit::InitDecl(self.parse_variable_declaration())
@@ -561,7 +561,7 @@ impl Parser {
     }
 
     /// <function> ::= "int" <identifier> "(" "void" ")" "{" { <block-item> } "}"
-    fn parse_declaration_list(&mut self) -> Vec<ast::Declaration<ast::Exp>> {
+    fn parse_declaration_list(&mut self) -> Vec<ast::Declaration<ast::UnTypedExp>> {
         match self.current_token() {
             tokens::Token::Eof => vec![],
             _ => {
