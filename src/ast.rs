@@ -1,3 +1,5 @@
+use crate::{constants, types};
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum UnaryOperator {
     Complement,
@@ -23,69 +25,51 @@ pub enum BinaryOperator {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Exp {
-    Constant(i64),
-    Unary(UnaryOperator, Box<Exp>),
-    Binary(BinaryOperator, Box<Exp>, Box<Exp>),
-    Var(String),
-    Assignment(Box<Exp>, Box<Exp>),
-    Conditional {
-        condition: Box<Exp>,
-        then_result: Box<Exp>,
-        else_result: Box<Exp>,
-    },
-    FunCall {
-        f: String,
-        args: Vec<Exp>,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Statement {
-    Return(Exp),
-    Expression(Exp),
+pub enum Statement<ExpType> {
+    Return(ExpType),
+    Expression(ExpType),
     If {
-        condition: Exp,
-        then_clause: Box<Statement>,
-        else_clause: Option<Box<Statement>>,
+        condition: ExpType,
+        then_clause: Box<Statement<ExpType>>,
+        else_clause: Option<Box<Statement<ExpType>>>,
     },
-    Compound(Block),
+    Compound(Block<ExpType>),
     Break(String),
     Continue(String),
     While {
-        condition: Exp,
-        body: Box<Statement>,
+        condition: ExpType,
+        body: Box<Statement<ExpType>>,
         id: String,
     },
     DoWhile {
-        body: Box<Statement>,
-        condition: Exp,
+        body: Box<Statement<ExpType>>,
+        condition: ExpType,
         id: String,
     },
     For {
-        init: ForInit,
-        condition: Option<Exp>,
-        post: Option<Exp>,
-        body: Box<Statement>,
+        init: ForInit<ExpType>,
+        condition: Option<ExpType>,
+        post: Option<ExpType>,
+        body: Box<Statement<ExpType>>,
         id: String,
     },
     Null,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum BlockItem {
-    S(Statement),
-    D(Declaration),
+pub enum BlockItem<ExpType> {
+    S(Statement<ExpType>),
+    D(Declaration<ExpType>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Block {
-    Block(Vec<BlockItem>),
+pub enum Block<ExpType> {
+    Block(Vec<BlockItem<ExpType>>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum T {
-    Program(Vec<Declaration>),
+pub enum ProgType<ExpType> {
+    Program(Vec<Declaration<ExpType>>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -95,28 +79,80 @@ pub enum StorageClass {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct VariableDeclaration {
+pub struct VariableDeclaration<ExpType> {
     pub name: String,
-    pub init: Option<Exp>,
+    pub var_type: types::Type,
+    pub init: Option<ExpType>,
     pub storage_class: Option<StorageClass>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum ForInit {
-    InitDecl(VariableDeclaration),
-    InitExp(Option<Exp>),
+pub enum ForInit<ExpType> {
+    InitDecl(VariableDeclaration<ExpType>),
+    InitExp(Option<ExpType>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct FunctionDeclaration {
+pub struct FunctionDeclaration<ExpType> {
     pub name: String,
+    pub fun_type: types::Type,
     pub params: Vec<String>,
-    pub body: Option<Block>,
+    pub body: Option<Block<ExpType>>,
     pub storage_class: Option<StorageClass>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Declaration {
-    FunDecl(FunctionDeclaration),
-    VarDecl(VariableDeclaration),
+pub enum Declaration<ExpType> {
+    FunDecl(FunctionDeclaration<ExpType>),
+    VarDecl(VariableDeclaration<ExpType>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum UnTypedExp {
+    Constant(constants::T),
+    Cast {
+        target_type: types::Type,
+        e: Box<UnTypedExp>,
+    },
+    Unary(UnaryOperator, Box<UnTypedExp>),
+    Binary(BinaryOperator, Box<UnTypedExp>, Box<UnTypedExp>),
+    Var(String),
+    Assignment(Box<UnTypedExp>, Box<UnTypedExp>),
+    Conditional {
+        condition: Box<UnTypedExp>,
+        then_result: Box<UnTypedExp>,
+        else_result: Box<UnTypedExp>,
+    },
+    FunCall {
+        f: String,
+        args: Vec<UnTypedExp>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum InnerExp {
+    Constant(constants::T),
+    Var(String),
+    Cast {
+        target_type: types::Type,
+        e: TypedExp,
+    },
+    Unary(UnaryOperator, TypedExp),
+    Binary(BinaryOperator, TypedExp, TypedExp),
+    Assignment(TypedExp, TypedExp),
+    Conditional {
+        condition: TypedExp,
+        then_result: TypedExp,
+        else_result: TypedExp,
+    },
+    Funcall {
+        f: String,
+        args: Vec<TypedExp>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TypedExp {
+    e: Box<InnerExp>,
+    t: types::Type,
 }

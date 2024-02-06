@@ -1,6 +1,9 @@
 use crate::{ast, unique_ids};
 
-fn label_statement(current_label: Option<String>, statement: ast::Statement) -> ast::Statement {
+fn label_statement(
+    current_label: Option<String>,
+    statement: ast::Statement<ast::Exp>,
+) -> ast::Statement<ast::Exp> {
     match statement {
         ast::Statement::Break(_) => match current_label {
             Some(l) => ast::Statement::Break(l),
@@ -67,14 +70,17 @@ fn label_statement(current_label: Option<String>, statement: ast::Statement) -> 
     }
 }
 
-fn label_block_item(current_label: Option<String>, block_item: ast::BlockItem) -> ast::BlockItem {
+fn label_block_item(
+    current_label: Option<String>,
+    block_item: ast::BlockItem<ast::Exp>,
+) -> ast::BlockItem<ast::Exp> {
     match block_item {
         ast::BlockItem::S(s) => ast::BlockItem::S(label_statement(current_label, s)),
         decl => decl,
     }
 }
 
-fn label_block(current_label: Option<String>, b: ast::Block) -> ast::Block {
+fn label_block(current_label: Option<String>, b: ast::Block<ast::Exp>) -> ast::Block<ast::Exp> {
     match b {
         ast::Block::Block(items) => {
             let mut block_items = vec![];
@@ -86,10 +92,11 @@ fn label_block(current_label: Option<String>, b: ast::Block) -> ast::Block {
     }
 }
 
-fn label_decl(f: ast::Declaration) -> ast::Declaration {
+fn label_decl(f: ast::Declaration<ast::Exp>) -> ast::Declaration<ast::Exp> {
     match f {
         ast::Declaration::FunDecl(fd) => ast::Declaration::FunDecl(ast::FunctionDeclaration {
             name: fd.name,
+            fun_type: fd.fun_type,
             params: fd.params,
             body: match fd.body {
                 Some(_body) => Some(label_block(None, _body)),
@@ -101,14 +108,14 @@ fn label_decl(f: ast::Declaration) -> ast::Declaration {
     }
 }
 
-pub fn label_loops(program: ast::T) -> ast::T {
+pub fn label_loops(program: ast::UntypedProgType) -> ast::UntypedProgType {
     match program {
-        ast::T::Program(decls) => {
+        ast::UntypedProgType::Program(decls) => {
             let mut arr = vec![];
             for decl in decls {
                 arr.push(label_decl(decl));
             }
-            ast::T::Program(arr)
+            ast::UntypedProgType::Program(arr)
         }
     }
 }

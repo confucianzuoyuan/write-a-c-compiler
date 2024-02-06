@@ -1,7 +1,7 @@
 use crate::{
     ast,
     ir::{self, IrValue},
-    symbols, unique_ids,
+    symbols, type_utils, types, unique_ids,
 };
 
 fn break_label(id: String) -> String {
@@ -10,6 +10,12 @@ fn break_label(id: String) -> String {
 
 fn continue_label(id: String) -> String {
     format!("continue.{}", id)
+}
+
+fn create_tmp(t: types::Type) -> String {
+    let name = unique_ids::make_temporary();
+    symbols::add_automatic_var(name, t);
+    name
 }
 
 fn convert_op(op: ast::UnaryOperator) -> ir::UnaryOperator {
@@ -37,14 +43,15 @@ fn convert_binop(op: ast::BinaryOperator) -> ir::BinaryOperator {
     }
 }
 
-fn emit_ir_for_exp(exp: ast::Exp) -> (Vec<ir::Instruction>, ir::IrValue) {
-    match exp {
+fn emit_ir_for_exp(exp: ast::TypedExp) -> (Vec<ir::Instruction>, ir::IrValue) {
+    match exp.e {
         ast::Exp::Constant(c) => (vec![], ir::IrValue::Constant(c)),
         ast::Exp::Var(v) => (vec![], ir::IrValue::Var(v)),
-        ast::Exp::Unary(op, inner) => emit_unary_expression(op, inner),
+        ast::Exp::Cast { target_type, e } => emit_cast_expression(target_type, e),
+        ast::Exp::Unary(op, inner) => emit_unary_expression(exp.t, op, inner),
         ast::Exp::Binary(ast::BinaryOperator::And, e1, e2) => emit_and_expression(e1, e2),
         ast::Exp::Binary(ast::BinaryOperator::Or, e1, e2) => emit_or_expression(e1, e2),
-        ast::Exp::Binary(op, e1, e2) => emit_binary_expression(op, e1, e2),
+        ast::Exp::Binary(op, e1, e2) => emit_binary_expression(exp.t, op, e1, e2),
         ast::Exp::Assignment(lhs, rhs) => match *lhs {
             ast::Exp::Var(v) => {
                 let (mut rhs_instructions, rhs_result) = emit_ir_for_exp(*rhs);
@@ -60,17 +67,18 @@ fn emit_ir_for_exp(exp: ast::Exp) -> (Vec<ir::Instruction>, ir::IrValue) {
             condition,
             then_result,
             else_result,
-        } => emit_conditional_expression(condition, then_result, else_result),
+        } => emit_conditional_expression(exp.t, condition, then_result, else_result),
         ast::Exp::FunCall { f, args } => emit_fun_call(f, args),
     }
 }
 
 fn emit_unary_expression(
+    t: types::Type,
     op: ast::UnaryOperator,
     inner: Box<ast::Exp>,
 ) -> (Vec<ir::Instruction>, ir::IrValue) {
     let (mut eval_inner, v) = emit_ir_for_exp(*inner);
-    let dst_name = unique_ids::make_temporary();
+    let dst_name = create_tmp(t);
     let dst = ir::IrValue::Var(dst_name);
     let ir_op = convert_op(op);
     eval_inner.push(ir::Instruction::Unary {
@@ -81,14 +89,43 @@ fn emit_unary_expression(
     (eval_inner, dst)
 }
 
+fn emit_cast_expression(
+    target_type: types::Type,
+    inner: ast::Exp,
+) -> (Vec<ir::Instruction>, ir::IrValue) {
+    let (mut eval_inner, result) = emit_ir_for_exp(inner);
+    if type_utils::get_type(inner) == target_type {
+        (eval_inner, result)
+    } else {
+        let dst_name = create_tmp(target_type);
+        let dst = ir::IrValue::Var(dst_name);
+        let cast_instruction = match target_type {
+            types::Type::Long => ir::Instruction::SignExtend {
+                src: result,
+                dst: dst,
+            },
+            types::Type::Int => ir::Instruction::Truncate {
+                src: result,
+                dst: dst,
+            },
+            _ => panic!("内部错误：cast to function type."),
+        };
+        let mut instructions = vec![];
+        instructions.append(&mut eval_inner);
+        instructions.push(cast_instruction);
+        (instructions, dst)
+    }
+}
+
 fn emit_binary_expression(
+    t: types::Type,
     op: ast::BinaryOperator,
     e1: Box<ast::Exp>,
     e2: Box<ast::Exp>,
 ) -> (Vec<ir::Instruction>, ir::IrValue) {
     let (mut eval_v1, v1) = emit_ir_for_exp(*e1);
     let (mut eval_v2, v2) = emit_ir_for_exp(*e2);
-    let dst_name = unique_ids::make_temporary();
+    let dst_name = create_tmp(t);
     let dst = ir::IrValue::Var(dst_name);
     let ir_op = convert_binop(op);
     let mut instructions = vec![];
@@ -159,6 +196,7 @@ fn emit_or_expression(e1: Box<ast::Exp>, e2: Box<ast::Exp>) -> (Vec<ir::Instruct
 }
 
 fn emit_conditional_expression(
+    t: types::Type,
     condition: Box<ast::Exp>,
     then_result: Box<ast::Exp>,
     else_result: Box<ast::Exp>,
@@ -189,7 +227,7 @@ fn emit_conditional_expression(
     (instructions, dst)
 }
 
-fn emit_ir_for_statement(statement: ast::Statement) -> Vec<ir::Instruction> {
+fn emit_ir_for_statement(statement: ast::Statement<ast::TypedExp>) -> Vec<ir::Instruction> {
     match statement {
         ast::Statement::Return(e) => {
             let (mut eval_exp, v) = emit_ir_for_exp(e);
@@ -235,24 +273,25 @@ fn emit_ir_for_statement(statement: ast::Statement) -> Vec<ir::Instruction> {
     }
 }
 
-fn emit_ir_for_block_item(declaration: ast::BlockItem) -> Vec<ir::Instruction> {
+fn emit_ir_for_block_item(declaration: ast::BlockItem<ast::TypedExp>) -> Vec<ir::Instruction> {
     match declaration {
         ast::BlockItem::S(s) => emit_ir_for_statement(s),
         ast::BlockItem::D(d) => emit_local_declaration(d),
     }
 }
 
-fn emit_local_declaration(d: ast::Declaration) -> Vec<ir::Instruction> {
+fn emit_local_declaration(d: ast::Declaration<ast::TypedExp>) -> Vec<ir::Instruction> {
     match d {
         ast::Declaration::VarDecl(vd) => emit_var_declaration(vd),
         ast::Declaration::FunDecl(_) => vec![],
     }
 }
 
-fn emit_var_declaration(vd: ast::VariableDeclaration) -> Vec<ir::Instruction> {
+fn emit_var_declaration(vd: ast::VariableDeclaration<ast::TypedExp>) -> Vec<ir::Instruction> {
     match vd {
         ast::VariableDeclaration {
             name,
+            var_type: _,
             init: Some(e),
             storage_class: _,
         } => {
@@ -264,6 +303,7 @@ fn emit_var_declaration(vd: ast::VariableDeclaration) -> Vec<ir::Instruction> {
         }
         ast::VariableDeclaration {
             name: _,
+            var_type: _,
             init: None,
             storage_class: _,
         } => vec![],
@@ -272,8 +312,8 @@ fn emit_var_declaration(vd: ast::VariableDeclaration) -> Vec<ir::Instruction> {
 
 fn emit_ir_for_if_statement(
     condition: ast::Exp,
-    then_clause: Box<ast::Statement>,
-    else_clause: Option<Box<ast::Statement>>,
+    then_clause: Box<ast::Statement<ast::TypedExp>>,
+    else_clause: Option<Box<ast::Statement<ast::TypedExp>>>,
 ) -> Vec<ir::Instruction> {
     match else_clause {
         None => {
@@ -304,7 +344,7 @@ fn emit_ir_for_if_statement(
 }
 
 fn emit_ir_for_do_loop(
-    body: Box<ast::Statement>,
+    body: Box<ast::Statement<ast::TypedExp>>,
     condition: ast::Exp,
     id: String,
 ) -> Vec<ir::Instruction> {
@@ -324,7 +364,7 @@ fn emit_ir_for_do_loop(
 
 fn emit_ir_for_while_loop(
     condition: ast::Exp,
-    body: Box<ast::Statement>,
+    body: Box<ast::Statement<ast::TypedExp>>,
     id: String,
 ) -> Vec<ir::Instruction> {
     let cont_label = continue_label(id.clone());
@@ -341,10 +381,10 @@ fn emit_ir_for_while_loop(
 }
 
 fn emit_ir_for_for_loop(
-    init: ast::ForInit,
+    init: ast::ForInit<ast::TypedExp>,
     condition: Option<ast::Exp>,
     post: Option<ast::Exp>,
-    body: Box<ast::Statement>,
+    body: Box<ast::Statement<ast::TypedExp>>,
     id: String,
 ) -> Vec<ir::Instruction> {
     let start_label = unique_ids::make_label("for_start".to_string());
@@ -403,10 +443,11 @@ fn emit_fun_call(f: String, args: Vec<ast::Exp>) -> (Vec<ir::Instruction>, IrVal
     (arg_instructions, dst)
 }
 
-fn emit_fun_declaration(fd: ast::Declaration) -> Option<ir::TopLevel> {
+fn emit_fun_declaration(fd: ast::Declaration<ast::TypedExp>) -> Option<ir::TopLevel> {
     match fd {
         ast::Declaration::FunDecl(ast::FunctionDeclaration {
             name,
+            fun_type: _,
             params,
             body: Some(ast::Block::Block(block_items)),
             storage_class: _,
@@ -436,11 +477,13 @@ fn convert_symbols_to_ir(all_symbols: Vec<(String, symbols::Entry)>) -> Vec<ir::
             symbols::IdentifierAttrs::StaticAttr { init, global } => match init {
                 symbols::InitialValue::Initial(i) => Some(ir::TopLevel::StaticVariable {
                     name: name,
+                    t: entry.t,
                     global: global,
                     init: i,
                 }),
                 symbols::InitialValue::Tentative => Some(ir::TopLevel::StaticVariable {
                     name: name,
+                    t: entry.t,
                     global: global,
                     init: 0,
                 }),
@@ -455,9 +498,9 @@ fn convert_symbols_to_ir(all_symbols: Vec<(String, symbols::Entry)>) -> Vec<ir::
     arr
 }
 
-pub fn gen(program: ast::T) -> ir::T {
+pub fn gen(program: ast::TypedProgType) -> ir::T {
     match program {
-        ast::T::Program(decls) => {
+        ast::TypedProgType::Program(decls) => {
             let mut ir_fn_defs = vec![];
             for fn_def in decls {
                 if let Some(fn_def_ir) = emit_fun_declaration(fn_def) {

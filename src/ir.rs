@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+use crate::{constants, initializers, types};
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum UnaryOperator {
     Complement,
@@ -52,7 +54,7 @@ impl Display for BinaryOperator {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum IrValue {
-    Constant(i64),
+    Constant(constants::T),
     Var(String),
 }
 
@@ -68,6 +70,14 @@ impl Display for IrValue {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Instruction {
     Return(IrValue),
+    SignExtend {
+        src: IrValue,
+        dst: IrValue,
+    },
+    Truncate {
+        src: IrValue,
+        dst: IrValue,
+    },
     Unary {
         op: UnaryOperator,
         src: IrValue,
@@ -148,8 +158,9 @@ pub enum TopLevel {
     },
     StaticVariable {
         name: String,
+        t: types::Type,
         global: bool,
-        init: i64,
+        init: initializers::StaticInit,
     },
 }
 

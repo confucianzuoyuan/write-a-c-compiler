@@ -53,6 +53,10 @@ fn resolve_exp(id_map: HashMap<String, VarEntry>, exp: ast::Exp) -> ast::Exp {
                 panic!("未声明变量：{:?}", v)
             }
         }
+        ast::Exp::Cast { target_type, e } => ast::Exp::Cast {
+            target_type: target_type,
+            e: resolve_exp(id_map, e),
+        },
         ast::Exp::Unary(op, e) => ast::Exp::Unary(op, Box::new(resolve_exp(id_map, *e))),
         ast::Exp::Binary(op, e1, e2) => ast::Exp::Binary(
             op,
@@ -124,9 +128,13 @@ fn resolve_local_var_helper(
 
 fn resolve_local_var_declaration(
     id_map: HashMap<String, VarEntry>,
-    vd: ast::VariableDeclaration,
-) -> (HashMap<String, VarEntry>, ast::VariableDeclaration) {
-    let (new_map, unique_name) = resolve_local_var_helper(id_map, vd.name, vd.storage_class.clone());
+    vd: ast::VariableDeclaration<ast::Exp>,
+) -> (
+    HashMap<String, VarEntry>,
+    ast::VariableDeclaration<ast::Exp>,
+) {
+    let (new_map, unique_name) =
+        resolve_local_var_helper(id_map, vd.name, vd.storage_class.clone());
     let resolved_init = match vd.init {
         Some(_init) => Some(resolve_exp(new_map.clone(), _init)),
         None => None,
@@ -135,6 +143,7 @@ fn resolve_local_var_declaration(
         new_map,
         ast::VariableDeclaration {
             name: unique_name,
+            var_type: vd.var_type,
             init: resolved_init,
             storage_class: vd.storage_class,
         },
@@ -143,8 +152,8 @@ fn resolve_local_var_declaration(
 
 fn resolve_for_init(
     id_map: HashMap<String, VarEntry>,
-    init: ast::ForInit,
-) -> (HashMap<String, VarEntry>, ast::ForInit) {
+    init: ast::ForInit<ast::Exp>,
+) -> (HashMap<String, VarEntry>, ast::ForInit<ast::Exp>) {
     match init {
         ast::ForInit::InitExp(e) => (
             id_map.clone(),
@@ -159,8 +168,8 @@ fn resolve_for_init(
 
 fn resolve_statement(
     id_map: HashMap<String, VarEntry>,
-    statement: ast::Statement,
-) -> ast::Statement {
+    statement: ast::Statement<ast::Exp>,
+) -> ast::Statement<ast::Exp> {
     match statement {
         ast::Statement::Return(e) => ast::Statement::Return(resolve_exp(id_map, e)),
         ast::Statement::Expression(e) => ast::Statement::Expression(resolve_exp(id_map, e)),
@@ -221,8 +230,8 @@ fn resolve_statement(
 
 fn resolve_block_item(
     id_map: HashMap<String, VarEntry>,
-    block_item: ast::BlockItem,
-) -> (HashMap<String, VarEntry>, ast::BlockItem) {
+    block_item: ast::BlockItem<ast::Exp>,
+) -> (HashMap<String, VarEntry>, ast::BlockItem<ast::Exp>) {
     match block_item {
         ast::BlockItem::S(s) => {
             let resolved_s = resolve_statement(id_map.clone(), s);
@@ -235,7 +244,10 @@ fn resolve_block_item(
     }
 }
 
-fn resolve_block(mut id_map: HashMap<String, VarEntry>, block: ast::Block) -> ast::Block {
+fn resolve_block(
+    mut id_map: HashMap<String, VarEntry>,
+    block: ast::Block<ast::Exp>,
+) -> ast::Block<ast::Exp> {
     match block {
         ast::Block::Block(items) => {
             let mut resolved_items = vec![];
@@ -251,8 +263,8 @@ fn resolve_block(mut id_map: HashMap<String, VarEntry>, block: ast::Block) -> as
 
 fn resolve_local_declaration(
     id_map: HashMap<String, VarEntry>,
-    declaration: ast::Declaration,
-) -> (HashMap<String, VarEntry>, ast::Declaration) {
+    declaration: ast::Declaration<ast::Exp>,
+) -> (HashMap<String, VarEntry>, ast::Declaration<ast::Exp>) {
     match declaration {
         ast::Declaration::VarDecl(vd) => {
             let (new_map, resolved_vd) = resolve_local_var_declaration(id_map, vd);
@@ -260,6 +272,7 @@ fn resolve_local_declaration(
         }
         ast::Declaration::FunDecl(ast::FunctionDeclaration {
             name: _,
+            fun_type: _,
             params: _,
             body: Some(_),
             storage_class: _,
@@ -268,6 +281,7 @@ fn resolve_local_declaration(
         }
         ast::Declaration::FunDecl(ast::FunctionDeclaration {
             name: _,
+            fun_type: _,
             params: _,
             body: _,
             storage_class: Some(ast::StorageClass::Static),
@@ -297,8 +311,11 @@ fn resolve_params(
 
 fn resolve_function_declaration(
     id_map: HashMap<String, VarEntry>,
-    f: ast::FunctionDeclaration,
-) -> (HashMap<String, VarEntry>, ast::FunctionDeclaration) {
+    f: ast::FunctionDeclaration<ast::Exp>,
+) -> (
+    HashMap<String, VarEntry>,
+    ast::FunctionDeclaration<ast::Exp>,
+) {
     match id_map.get(&f.name) {
         Some(VarEntry {
             unique_name: _,
@@ -325,6 +342,7 @@ fn resolve_function_declaration(
                 new_map,
                 ast::FunctionDeclaration {
                     name: f.name,
+                    fun_type: f.fun_type,
                     params: resolved_params,
                     body: resolved_body,
                     storage_class: f.storage_class,
@@ -336,8 +354,11 @@ fn resolve_function_declaration(
 
 pub fn resolve_file_scope_variable_declaration(
     id_map: HashMap<String, VarEntry>,
-    vd: ast::VariableDeclaration,
-) -> (HashMap<String, VarEntry>, ast::VariableDeclaration) {
+    vd: ast::VariableDeclaration<ast::Exp>,
+) -> (
+    HashMap<String, VarEntry>,
+    ast::VariableDeclaration<ast::Exp>,
+) {
     let mut new_map = id_map.clone();
     new_map.insert(
         vd.name.clone(),
@@ -352,8 +373,8 @@ pub fn resolve_file_scope_variable_declaration(
 
 pub fn resolve_global_declaration(
     id_map: HashMap<String, VarEntry>,
-    d: ast::Declaration,
-) -> (HashMap<String, VarEntry>, ast::Declaration) {
+    d: ast::Declaration<ast::Exp>,
+) -> (HashMap<String, VarEntry>, ast::Declaration<ast::Exp>) {
     match d {
         ast::Declaration::FunDecl(fd) => {
             let (new_map, fd) = resolve_function_declaration(id_map, fd);
@@ -366,9 +387,9 @@ pub fn resolve_global_declaration(
     }
 }
 
-pub fn resolve(program: ast::T) -> ast::T {
+pub fn resolve(program: ast::UntypedProgType) -> ast::UntypedProgType {
     match program {
-        ast::T::Program(decls) => {
+        ast::UntypedProgType::Program(decls) => {
             let mut resolved_decls = vec![];
             let mut id_map = HashMap::new();
             for decl in decls {
@@ -376,7 +397,7 @@ pub fn resolve(program: ast::T) -> ast::T {
                 id_map = t.0;
                 resolved_decls.push(t.1);
             }
-            ast::T::Program(resolved_decls)
+            ast::UntypedProgType::Program(resolved_decls)
         }
     }
 }

@@ -59,6 +59,7 @@ impl<R: Read> Lexer<R> {
         let token = match buffer.as_str() {
             "void" => tokens::Token::KWVoid,
             "int" => tokens::Token::KWInt,
+            "long" => tokens::Token::KWLong,
             "return" => tokens::Token::KWReturn,
             "if" => tokens::Token::KWIf,
             "else" => tokens::Token::KWElse,
@@ -89,8 +90,17 @@ impl<R: Read> Lexer<R> {
                 break;
             }
         }
-        let num = buffer.parse().unwrap();
-        tokens::Token::Constant(num)
+        if ch == b'l' || ch == b'L' {
+            self.advance();
+            let num = buffer.parse().unwrap();
+            tokens::Token::ConstLong(num)
+        } else {
+            let num = buffer.parse();
+            match num {
+                Ok(i) => tokens::Token::ConstInt(i),
+                Err(_) => tokens::Token::ConstLong(num.unwrap() as i64),
+            }
+        }
     }
 
     pub fn get_one_token(&mut self) -> tokens::Token {

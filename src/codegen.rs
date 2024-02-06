@@ -1,4 +1,4 @@
-use crate::{assembly, ir};
+use crate::{assembly, assembly_symbols, constants, ir, symbols, type_utils, types};
 
 const PARAM_PASSING_REGS: [assembly::Reg; 6] = [
     assembly::Reg::DI,
@@ -9,10 +9,34 @@ const PARAM_PASSING_REGS: [assembly::Reg; 6] = [
     assembly::Reg::R9,
 ];
 
+const ZERO: assembly::Operand = assembly::Operand::Imm(0 as i64);
+
 fn convert_val(ir_value: ir::IrValue) -> assembly::Operand {
     match ir_value {
-        ir::IrValue::Constant(i) => assembly::Operand::Imm(i),
+        ir::IrValue::Constant(constants::T::ConstInt(i)) => assembly::Operand::Imm(i as i64),
+        ir::IrValue::Constant(constants::T::ConstLong(i)) => assembly::Operand::Imm(i),
         ir::IrValue::Var(v) => assembly::Operand::Pseudo(v),
+    }
+}
+
+fn convert_type(t: types::Type) -> assembly::AsmType {
+    match t {
+        types::Type::Int => assembly::AsmType::Longword,
+        types::Type::Long => assembly::AsmType::Quadword,
+        types::Type::FunType {
+            param_types: _,
+            ret_type: _,
+        } => {
+            panic!("内部错误，无法将函数类型转换成汇编代码。")
+        }
+    }
+}
+
+fn asm_type(t: ir::IrValue) -> assembly::AsmType {
+    match t {
+        ir::IrValue::Constant(constants::T::ConstLong(_)) => assembly::AsmType::Quadword,
+        ir::IrValue::Constant(constants::T::ConstInt(_)) => assembly::AsmType::Longword,
+        ir::IrValue::Var(v) => convert_type(symbols::get(v).t),
     }
 }
 
@@ -70,12 +94,18 @@ fn convert_function_call(
     let mut instructions = if stack_padding == 0 {
         vec![]
     } else {
-        vec![assembly::Instruction::AllocateStack(stack_padding)]
+        vec![assembly::Instruction::Binary {
+            op: assembly::BinaryOperator::Sub,
+            t: assembly::AsmType::Quadword,
+            src: assembly::Operand::Imm(stack_padding as i64),
+            dst: assembly::Operand::Reg(assembly::Reg::SP),
+        }]
     };
     for (i, reg_arg) in reg_args.iter().enumerate() {
         let r = PARAM_PASSING_REGS[i].clone();
         let assembly_arg = convert_val(reg_arg.clone());
         instructions.push(assembly::Instruction::Mov(
+            asm_type(reg_arg),
             assembly_arg,
             assembly::Operand::Reg(r),
         ));
@@ -86,10 +116,23 @@ fn convert_function_call(
             assembly::Operand::Imm(_) | assembly::Operand::Reg(_) => {
                 vec![assembly::Instruction::Push(assembly_arg)]
             }
-            _ => vec![
-                assembly::Instruction::Mov(assembly_arg, assembly::Operand::Reg(assembly::Reg::AX)),
-                assembly::Instruction::Push(assembly::Operand::Reg(assembly::Reg::AX)),
-            ],
+            _ => {
+                let assemby_type = asm_type(stack_arg);
+                if assemby_type == assembly::AsmType::Quadword {
+                    vec![assembly::Instruction::Push(assembly::Operand::Reg(
+                        assembly::Reg::AX,
+                    ))]
+                } else {
+                    vec![
+                        assembly::Instruction::Mov(
+                            assemby_type,
+                            assembly_arg,
+                            assembly::Operand::Reg(assembly::Reg::AX),
+                        ),
+                        assembly::Instruction::Push(assembly::Operand::Reg(assembly::Reg::AX)),
+                    ]
+                }
+            }
         });
     }
     instructions.push(assembly::Instruction::Call(f));
@@ -97,11 +140,17 @@ fn convert_function_call(
     let mut dealloc = if bytes_to_remove == 0 {
         vec![]
     } else {
-        vec![assembly::Instruction::DeallocateStack(bytes_to_remove)]
+        vec![assembly::Instruction::Binary {
+            op: assembly::BinaryOperator::Add,
+            t: assembly::AsmType::Quadword,
+            src: assembly::Operand::Imm(bytes_to_remove as i64),
+            dst: assembly::Operand::Reg(assembly::Reg::SP),
+        }]
     };
     instructions.append(&mut dealloc);
     let assembly_dst = convert_val(dst);
     instructions.push(assembly::Instruction::Mov(
+        asm_type(dst),
         assembly::Operand::Reg(assembly::Reg::AX),
         assembly_dst,
     ));
@@ -111,14 +160,16 @@ fn convert_function_call(
 fn convert_instruction(ir_instruction: ir::Instruction) -> Vec<assembly::Instruction> {
     match ir_instruction {
         ir::Instruction::Copy { src, dst } => {
+            let t = asm_type(src);
             let asm_src = convert_val(src);
             let asm_dst = convert_val(dst);
-            vec![assembly::Instruction::Mov(asm_src, asm_dst)]
+            vec![assembly::Instruction::Mov(t, asm_src, asm_dst)]
         }
         ir::Instruction::Return(ir_value) => {
+            let t = asm_type(ir_value);
             let asm_val = convert_val(ir_value);
             vec![
-                assembly::Instruction::Mov(asm_val, assembly::Operand::Reg(assembly::Reg::AX)),
+                assembly::Instruction::Mov(t, asm_val, assembly::Operand::Reg(assembly::Reg::AX)),
                 assembly::Instruction::Ret,
             ]
         }
@@ -127,21 +178,24 @@ fn convert_instruction(ir_instruction: ir::Instruction) -> Vec<assembly::Instruc
             src,
             dst,
         } => {
+            let src_t = asm_type(src);
+            let dst_t = asm_type(dst);
             let asm_src = convert_val(src);
             let asm_dst = convert_val(dst);
             vec![
-                assembly::Instruction::Cmp(assembly::Operand::Imm(0), asm_src),
-                assembly::Instruction::Mov(assembly::Operand::Imm(0), asm_dst.clone()),
+                assembly::Instruction::Cmp(src_t, assembly::Operand::Imm(0), asm_src),
+                assembly::Instruction::Mov(dst_t, assembly::Operand::Imm(0), asm_dst.clone()),
                 assembly::Instruction::SetCC(assembly::CondCode::E, asm_dst),
             ]
         }
         ir::Instruction::Unary { op, src, dst } => {
+            let t = asm_type(src);
             let asm_op = convert_unop(op);
             let asm_src = convert_val(src);
             let asm_dst = convert_val(dst);
             vec![
-                assembly::Instruction::Mov(asm_src, asm_dst.clone()),
-                assembly::Instruction::Unary(asm_op, asm_dst),
+                assembly::Instruction::Mov(t, asm_src, asm_dst.clone()),
+                assembly::Instruction::Unary(asm_op, t, asm_dst),
             ]
         }
         ir::Instruction::Binary {
@@ -150,6 +204,8 @@ fn convert_instruction(ir_instruction: ir::Instruction) -> Vec<assembly::Instruc
             src2,
             dst,
         } => {
+            let src_t = asm_type(src1);
+            let dst_t = asm_type(dst);
             let asm_src1 = convert_val(src1);
             let asm_src2 = convert_val(src2);
             let asm_dst = convert_val(dst);
@@ -162,8 +218,12 @@ fn convert_instruction(ir_instruction: ir::Instruction) -> Vec<assembly::Instruc
                 | ir::BinaryOperator::LessOrEqual => {
                     let cond_code = convert_cond_code(op);
                     vec![
-                        assembly::Instruction::Cmp(asm_src2, asm_src1),
-                        assembly::Instruction::Mov(assembly::Operand::Imm(0), asm_dst.clone()),
+                        assembly::Instruction::Cmp(src_t, asm_src2, asm_src1),
+                        assembly::Instruction::Mov(
+                            dst_t,
+                            assembly::Operand::Imm(0),
+                            asm_dst.clone(),
+                        ),
                         assembly::Instruction::SetCC(cond_code, asm_dst),
                     ]
                 }
@@ -174,12 +234,14 @@ fn convert_instruction(ir_instruction: ir::Instruction) -> Vec<assembly::Instruc
                     };
                     vec![
                         assembly::Instruction::Mov(
+                            src_t,
                             asm_src1,
                             assembly::Operand::Reg(assembly::Reg::AX),
                         ),
-                        assembly::Instruction::Cdq,
-                        assembly::Instruction::Idiv(asm_src2),
+                        assembly::Instruction::Cdq(src_t),
+                        assembly::Instruction::Idiv(src_t, asm_src2),
                         assembly::Instruction::Mov(
+                            src_t,
                             assembly::Operand::Reg(result_reg),
                             asm_dst.clone(),
                         ),
@@ -188,9 +250,10 @@ fn convert_instruction(ir_instruction: ir::Instruction) -> Vec<assembly::Instruc
                 _ => {
                     let asm_op = convert_binop(op);
                     vec![
-                        assembly::Instruction::Mov(asm_src1, asm_dst.clone()),
+                        assembly::Instruction::Mov(src_t, asm_src1, asm_dst.clone()),
                         assembly::Instruction::Binary {
                             op: asm_op,
+                            t: src_t,
                             src: asm_src2,
                             dst: asm_dst,
                         },
@@ -200,21 +263,37 @@ fn convert_instruction(ir_instruction: ir::Instruction) -> Vec<assembly::Instruc
         }
         ir::Instruction::Jump(target) => vec![assembly::Instruction::Jmp(target)],
         ir::Instruction::JumpIfZero(cond, target) => {
+            let t = asm_type(cond);
             let asm_cond = convert_val(cond);
             vec![
-                assembly::Instruction::Cmp(assembly::Operand::Imm(0), asm_cond),
+                assembly::Instruction::Cmp(t, assembly::Operand::Imm(0), asm_cond),
                 assembly::Instruction::JmpCC(assembly::CondCode::E, target),
             ]
         }
         ir::Instruction::JumpIfNotZero(cond, target) => {
+            let t = asm_type(cond);
             let asm_cond = convert_val(cond);
             vec![
-                assembly::Instruction::Cmp(assembly::Operand::Imm(0), asm_cond),
+                assembly::Instruction::Cmp(t, assembly::Operand::Imm(0), asm_cond),
                 assembly::Instruction::JmpCC(assembly::CondCode::NE, target),
             ]
         }
         ir::Instruction::Label(l) => vec![assembly::Instruction::Label(l)],
         ir::Instruction::FunCall { f, args, dst } => convert_function_call(f, args, dst),
+        ir::Instruction::SignExtend { src, dst } => {
+            let asm_src = convert_val(src);
+            let asm_dst = convert_val(dst);
+            vec![assembly::Instruction::Movsx(asm_src, asm_dst)]
+        }
+        ir::Instruction::Truncate { src, dst } => {
+            let asm_src = convert_val(src);
+            let asm_dst = convert_val(dst);
+            vec![assembly::Instruction::Mov(
+                assembly::AsmType::Longword,
+                asm_src,
+                asm_dst,
+            )]
+        }
     }
 }
 
@@ -231,14 +310,18 @@ fn pass_params(param_list: Vec<String>) -> Vec<assembly::Instruction> {
     let mut instructions = vec![];
     for (i, param) in register_params.iter().enumerate() {
         let r = PARAM_PASSING_REGS[i].clone();
+        let param_t = asm_type(ir::IrValue::Var(param));
         instructions.push(assembly::Instruction::Mov(
+            param_t,
             assembly::Operand::Reg(r),
             assembly::Operand::Pseudo(param.clone()),
         ));
     }
     for (i, param) in stack_params.iter().enumerate() {
         let stk = assembly::Operand::Stack(16 + (8 * i as i64));
+        let param_t = asm_type(ir::IrValue::Var(param));
         instructions.push(assembly::Instruction::Mov(
+            param_t,
             stk,
             assembly::Operand::Pseudo(param.clone()),
         ))
@@ -264,11 +347,36 @@ fn convert_top_level(top_level: ir::TopLevel) -> assembly::TopLevel {
                 instructions: instructions,
             }
         }
-        ir::TopLevel::StaticVariable { name, global, init } => assembly::TopLevel::StaticVariable {
+        ir::TopLevel::StaticVariable {
+            name,
+            t,
+            global,
+            init,
+        } => assembly::TopLevel::StaticVariable {
             name: name,
+            alignment: type_utils::get_alignment(t),
             global: global,
             init: init,
         },
+    }
+}
+
+fn convert_symbol(name: String, entry: symbols::Entry) {
+    match entry {
+        symbols::Entry {
+            t: _,
+            attrs:
+                symbols::IdentifierAttrs::FunAttr {
+                    defined,
+                    global: _,
+                    stack_frame_size: _,
+                },
+        } => assembly_symbols::add_fun(name, defined),
+        symbols::Entry {
+            t,
+            attrs: symbols::IdentifierAttrs::StaticAttr { init: _, global: _ },
+        } => assembly_symbols::add_var(name, convert_type(t), true),
+        symbols::Entry { t, attrs: _ } => assembly_symbols::add_var(name, convert_type(t), false),
     }
 }
 
@@ -279,6 +387,7 @@ pub fn gen(program: ir::T) -> assembly::T {
             for top_level in top_levels {
                 tls.push(convert_top_level(top_level));
             }
+            symbols::iter(convert_symbol);
             assembly::T::Program(tls)
         }
     }

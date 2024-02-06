@@ -1,100 +1,245 @@
-use crate::{ast, symbols, types};
+use std::process::id;
 
-pub fn typecheck_exp(exp: ast::Exp) {
+use crate::{ast, const_convert, constants, initializers, symbols, type_utils, types};
+
+pub fn convert_to(e: Box<ast::Exp>, target_type: types::Type) -> ast::TypedExp {
+    let cast = ast::Exp::Cast {
+        target_type: target_type,
+        e: e,
+    };
+    type_utils::set_type(cast, target_type)
+}
+
+pub fn get_comman_type(t1: types::Type, t2: types::Type) -> types::Type {
+    if t1 == t2 {
+        t1
+    } else {
+        types::Type::Long
+    }
+}
+
+pub fn typecheck_var(v: String) -> ast::TypedExp {
+    let v_type = symbols::get(v).t;
+    let e = ast::Exp::Var(v);
+    match v_type {
+        types::Type::FunType {
+            param_types: _,
+            ret_type: _,
+        } => panic!("试图将函数名用作变量。"),
+        types::Type::Int | types::Type::Long => type_utils::set_type(e, v_type),
+    }
+}
+
+pub fn typecheck_const(c: constants::T) -> ast::TypedExp {
+    let e = ast::Exp::Constant(c);
+    match c {
+        constants::T::ConstInt(_) => type_utils::set_type(e, types::Type::Int),
+        constants::T::ConstLong(_) => type_utils::set_type(e, types::Type::Long),
+    }
+}
+
+pub fn typecheck_exp(exp: ast::Exp) -> ast::TypedExp {
     match exp {
-        ast::Exp::FunCall { f, args } => {
-            let t = symbols::get(f).t.clone();
-            match t {
-                types::Type::Int => panic!("试图将一个变量作为函数名使用"),
-                types::Type::FunType { param_count } => {
-                    if args.len() != param_count {
-                        panic!("传给函数的参数数量错误。");
-                    } else {
-                        for arg in args {
-                            typecheck_exp(arg);
-                        }
-                    }
-                }
-            }
+        ast::Exp::FunCall { f, args } => typecheck_fun_call(f, args),
+        ast::Exp::Var(v) => typecheck_var(v),
+        ast::Exp::Cast {
+            target_type,
+            e: inner,
+        } => {
+            let cast_exp = ast::Exp::Cast {
+                target_type: target_type,
+                e: Box::new(typecheck_exp(*inner).e),
+            };
+            type_utils::set_type(cast_exp, target_type)
         }
-        ast::Exp::Var(v) => {
-            let t = symbols::get(v).t.clone();
-            match t {
-                types::Type::Int => (),
-                types::Type::FunType { param_count: _ } => panic!("试图将函数名作为变量使用。"),
-            }
-        }
-        ast::Exp::Unary(_, inner) => typecheck_exp(*inner),
-        ast::Exp::Binary(_, e1, e2) => {
-            typecheck_exp(*e1);
-            typecheck_exp(*e2);
-        }
-        ast::Exp::Assignment(lhs, rhs) => {
-            typecheck_exp(*lhs);
-            typecheck_exp(*rhs);
-        }
+        ast::Exp::Unary(op, inner) => typecheck_unary(op, *inner),
+        ast::Exp::Binary(op, e1, e2) => typecheck_binary(op, *e1, *e2),
+        ast::Exp::Assignment(lhs, rhs) => typecheck_assignment(*lhs, *rhs),
         ast::Exp::Conditional {
             condition,
             then_result,
             else_result,
-        } => {
-            typecheck_exp(*condition);
-            typecheck_exp(*then_result);
-            typecheck_exp(*else_result);
-        }
-        ast::Exp::Constant(_) => (),
+        } => typecheck_conditional(*condition, *then_result, *else_result),
+        ast::Exp::Constant(c) => typecheck_const(c),
     }
 }
 
-pub fn typecheck_block(b: ast::Block) {
-    match b {
-        ast::Block::Block(block_items) => {
-            for item in block_items {
-                typecheck_block_item(item);
+pub fn typecheck_unary(op: ast::UnaryOperator, inner: ast::Exp) -> ast::TypedExp {
+    let typed_inner = typecheck_exp(inner);
+    let unary_exp = ast::Exp::Unary(op, Box::new(typed_inner.e));
+    match op {
+        ast::UnaryOperator::Not => type_utils::set_type(unary_exp, types::Type::Int),
+        _ => type_utils::set_type(unary_exp, type_utils::get_type(typed_inner)),
+    }
+}
+
+pub fn typecheck_binary(op: ast::BinaryOperator, e1: ast::Exp, e2: ast::Exp) -> ast::TypedExp {
+    let typed_e1 = typecheck_exp(e1);
+    let typed_e2 = typecheck_exp(e2);
+    match op {
+        ast::BinaryOperator::Add | ast::BinaryOperator::Or => {
+            let typed_binexp = ast::Exp::Binary(op, Box::new(typed_e1.e), Box::new(typed_e2.e));
+            type_utils::set_type(typed_binexp, types::Type::Int)
+        }
+        _ => {
+            let t1 = type_utils::get_type(typed_e1);
+            let t2 = type_utils::get_type(typed_e2);
+            let common_type = get_comman_type(t1, t2);
+            let converted_e1 = convert_to(Box::new(typed_e1.e), common_type);
+            let converted_e2 = convert_to(Box::new(typed_e2.e), common_type);
+            let binary_exp =
+                ast::Exp::Binary(op, Box::new(converted_e1.e), Box::new(converted_e2.e));
+            match op {
+                ast::BinaryOperator::Add
+                | ast::BinaryOperator::Subtract
+                | ast::BinaryOperator::Multiply
+                | ast::BinaryOperator::Divide
+                | ast::BinaryOperator::Mod => type_utils::set_type(binary_exp, common_type),
+                _ => type_utils::set_type(binary_exp, types::Type::Int),
             }
         }
     }
 }
 
-pub fn typecheck_block_item(block_item: ast::BlockItem) {
+pub fn typecheck_assignment(lhs: ast::Exp, rhs: ast::Exp) -> ast::TypedExp {
+    let typed_lhs = typecheck_exp(lhs);
+    let lhs_type = type_utils::get_type(typed_lhs);
+    let typed_rhs = typecheck_exp(rhs);
+    let converted_rhs = convert_to(Box::new(typed_rhs.e), lhs_type);
+    let assign_exp = ast::Exp::Assignment(Box::new(typed_lhs.e), Box::new(converted_rhs.e));
+    type_utils::set_type(assign_exp, lhs_type)
+}
+
+pub fn typecheck_conditional(
+    condition: ast::Exp,
+    then_exp: ast::Exp,
+    else_exp: ast::Exp,
+) -> ast::TypedExp {
+    let typed_condition = typecheck_exp(condition);
+    let typed_then = typecheck_exp(then_exp);
+    let typed_else = typecheck_exp(else_exp);
+    let common_type = get_comman_type(
+        type_utils::get_type(typed_then),
+        type_utils::get_type(typed_else),
+    );
+    let converted_then = convert_to(Box::new(typed_then.e), common_type);
+    let converted_else = convert_to(Box::new(typed_else.e), common_type);
+    let conditional_exp = ast::Exp::Conditional {
+        condition: Box::new(typed_condition.e),
+        then_result: Box::new(converted_then.e),
+        else_result: Box::new(converted_else.e),
+    };
+    type_utils::set_type(conditional_exp, common_type)
+}
+
+pub fn typecheck_fun_call(f: String, args: Vec<ast::Exp>) -> ast::TypedExp {
+    let f_type = symbols::get(f).t;
+    match f_type {
+        types::Type::Int | types::Type::Long => panic!("tried to use variable as function name."),
+        types::Type::FunType {
+            param_types,
+            ret_type,
+        } => {
+            if param_types.len() != args.len() {
+                panic!("function called with wrong number of arguments.")
+            }
+            let mut converted_args = vec![];
+            for i in 0..param_types.len() {
+                converted_args.push(convert_to(
+                    Box::new(typecheck_exp(args[i]).e),
+                    *param_types[i],
+                ));
+            }
+            let call_exp = ast::Exp::FunCall {
+                f: f,
+                args: converted_args,
+            };
+            type_utils::set_type(call_exp, ret_type)
+        }
+    }
+}
+
+pub fn to_static_init(var_type: types::Type, init: ast::Exp) -> ast::TypedExp {
+    match init {
+        ast::Exp::Constant(c) => {
+            let init_val = match const_convert::const_convert(var_type, c) {
+                constants::T::ConstInt(i) => initializers::StaticInit::IntInit(i),
+                constants::T::ConstLong(l) => initializers::StaticInit::LongInit(l),
+            };
+            symbols::InitialValue::Initial(init_val)
+        }
+        _ => panic!("non-constant initializer on static variable."),
+    }
+}
+
+pub fn typecheck_block(
+    ret_type: types::Type,
+    b: ast::Block<ast::Exp>,
+) -> ast::Block<ast::TypedExp> {
+    match b {
+        ast::Block::Block(block_items) => {
+            let mut typed_block_items = vec![];
+            for item in block_items {
+                typed_block_items.push(typecheck_block_item(ret_type, item));
+            }
+        }
+    }
+}
+
+pub fn typecheck_block_item(
+    ret_type: types::Type,
+    block_item: ast::BlockItem<ast::Exp>,
+) -> ast::BlockItem<ast::TypedExp> {
     match block_item {
-        ast::BlockItem::S(s) => typecheck_statement(s),
+        ast::BlockItem::S(s) => typecheck_statement(ret_type, s),
         ast::BlockItem::D(d) => typecheck_local_decl(d),
     }
 }
 
-pub fn typecheck_statement(statement: ast::Statement) {
+pub fn typecheck_statement(
+    ret_type: types::Type,
+    statement: ast::Statement<ast::Exp>,
+) -> ast::Statement<ast::TypedExp> {
     match statement {
-        ast::Statement::Return(e) => typecheck_exp(e),
-        ast::Statement::Expression(e) => typecheck_exp(e),
+        ast::Statement::Return(e) => {
+            let typed_e = typecheck_exp(e);
+            ast::Statement::Return(convert_to(typed_e, ret_type))
+        }
+        ast::Statement::Expression(e) => ast::Statement::Expression(typecheck_exp(e)),
         ast::Statement::If {
             condition,
             then_clause,
             else_clause,
-        } => {
-            typecheck_exp(condition);
-            typecheck_statement(*then_clause);
-            if else_clause.is_some() {
-                typecheck_statement(*else_clause.unwrap());
-            }
+        } => ast::Statement::If {
+            condition: typecheck_exp(condition),
+            then_clause: typecheck_statement(ret_type, then_clause),
+            else_clause: if else_clause.is_some() {
+                typecheck_statement(ret_type, else_clause.unwrap())
+            } else {
+                None
+            },
+        },
+        ast::Statement::Compound(block) => {
+            ast::Statement::Compound(typecheck_block(ret_type, block))
         }
-        ast::Statement::Compound(block) => typecheck_block(block),
         ast::Statement::While {
             condition,
             body,
-            id: _,
-        } => {
-            typecheck_exp(condition);
-            typecheck_statement(*body);
-        }
+            id,
+        } => ast::Statement::While {
+            condition: typecheck_exp(condition),
+            body: typecheck_statement(ret_type, body),
+            id: id,
+        },
         ast::Statement::DoWhile {
             body,
             condition,
-            id: _,
-        } => {
-            typecheck_statement(*body);
-            typecheck_exp(condition);
-        }
+            id,
+        } => ast::Statement::DoWhile {
+            body: typecheck_statement(ret_type, body),
+            condition: typecheck_exp(condition),
+            id: id,
+        },
         ast::Statement::For {
             init,
             condition,
@@ -102,34 +247,50 @@ pub fn typecheck_statement(statement: ast::Statement) {
             body,
             id: _,
         } => {
-            match init {
-                ast::ForInit::InitDecl(d) => typecheck_local_var_decl(d),
-                ast::ForInit::InitExp(e) => {
-                    if e.is_some() {
-                        typecheck_exp(e.unwrap());
-                    }
-                }
+            let typechecked_for_init = match init {
+                ast::ForInit::InitDecl(ast::VariableDeclaration {
+                    name: _,
+                    var_type: _,
+                    init: _,
+                    storage_class: Some(_),
+                }) => panic!("storage class not permitted on declaration in for loop header."),
+                ast::ForInit::InitDecl(d) => ast::ForInit::InitDecl(typecheck_local_var_decl(d)),
+                ast::ForInit::InitExp(e) => ast::ForInit::InitExp(if e.is_some() {
+                    Some(typecheck_exp(e))
+                } else {
+                    None
+                }),
             };
-            if condition.is_some() {
-                typecheck_exp(condition.unwrap());
+            ast::Statement::For {
+                init: typechecked_for_init,
+                condition: if condition.is_some() {
+                    Some(typecheck_exp(condition))
+                } else {
+                    None
+                },
+                post: if post.is_some() {
+                    Some(typecheck_exp(post))
+                } else {
+                    None
+                },
+                body: typecheck_statement(ret_type, body),
+                id: id,
             }
-            if post.is_some() {
-                typecheck_exp(post.unwrap());
-            }
-            typecheck_statement(*body);
         }
-        ast::Statement::Null | ast::Statement::Break(_) | ast::Statement::Continue(_) => (),
+        s @ (ast::Statement::Null | ast::Statement::Break(_) | ast::Statement::Continue(_)) => s,
     }
 }
 
-pub fn typecheck_local_decl(d: ast::Declaration) {
+pub fn typecheck_local_decl(d: ast::Declaration<ast::Exp>) -> ast::Declaration<ast::TypedExp> {
     match d {
         ast::Declaration::VarDecl(vd) => typecheck_local_var_decl(vd),
         ast::Declaration::FunDecl(fd) => typecheck_fn_decl(fd),
     }
 }
 
-pub fn typecheck_local_var_decl(vd: ast::VariableDeclaration) {
+pub fn typecheck_local_var_decl(
+    vd: ast::VariableDeclaration<ast::Exp>,
+) -> ast::VariableDeclaration<ast::TypedExp> {
     match vd.storage_class {
         Some(ast::StorageClass::Extern) => {
             if vd.init.is_some() {
@@ -166,17 +327,16 @@ pub fn typecheck_local_var_decl(vd: ast::VariableDeclaration) {
     }
 }
 
-pub fn typecheck_fn_decl(fd: ast::FunctionDeclaration) {
-    let fun_type = types::Type::FunType {
-        param_count: fd.params.len(),
-    };
+pub fn typecheck_fn_decl(
+    fd: ast::FunctionDeclaration<ast::Exp>,
+) -> ast::FunctionDeclaration<ast::TypedExp> {
     let has_body = fd.body.is_some();
     let global = fd.storage_class != Some(ast::StorageClass::Static);
     let old_decl = symbols::get_opt(fd.name.clone());
     let (defined, global) = match old_decl {
         None => (has_body, global),
         Some(_old_decl) => {
-            if _old_decl.t != fun_type {
+            if _old_decl.t != fd.fun_type {
                 panic!("redeclared function {} with a different type", fd.name);
             } else {
                 match _old_decl.attrs {
@@ -201,18 +361,27 @@ pub fn typecheck_fn_decl(fd: ast::FunctionDeclaration) {
         }
     };
 
-    symbols::add_fun(fd.name, fun_type, global, defined);
+    symbols::add_fun(fd.name, fd.fun_type, global, defined);
+    let (param_ts, return_t) = match fd.fun_type {
+        types::Type::FunType {
+            param_types,
+            ret_type,
+        } => (param_types, ret_type),
+        _ => panic!("内部错误，function has non-function type."),
+    };
     if has_body {
-        for param in fd.params {
+        for param in param_ts {
             symbols::add_automatic_var(param, types::Type::Int);
         }
     }
     if fd.body.is_some() {
-        typecheck_block(fd.body.unwrap());
+        let body = typecheck_block(return_t, fd.body.unwrap());
     }
 }
 
-pub fn typecheck_file_scope_var_decl(vd: ast::VariableDeclaration) {
+pub fn typecheck_file_scope_var_decl(
+    vd: ast::VariableDeclaration<ast::Exp>,
+) -> ast::VariableDeclaration<ast::TypedExp> {
     let current_init = match vd.init {
         Some(ast::Exp::Constant(c)) => symbols::InitialValue::Initial(c),
         None => {
@@ -257,16 +426,16 @@ pub fn typecheck_file_scope_var_decl(vd: ast::VariableDeclaration) {
     symbols::add_static_var(vd.name, types::Type::Int, global, init);
 }
 
-pub fn typecheck_global_decl(d: ast::Declaration) {
+pub fn typecheck_global_decl(d: ast::Declaration<ast::Exp>) -> ast::Declaration<ast::TypedExp> {
     match d {
         ast::Declaration::FunDecl(fd) => typecheck_fn_decl(fd),
         ast::Declaration::VarDecl(vd) => typecheck_file_scope_var_decl(vd),
     }
 }
 
-pub fn typecheck(program: ast::T) {
+pub fn typecheck(program: ast::UntypedProgType) -> ast::TypedProgType {
     match program {
-        ast::T::Program(fn_decls) => {
+        ast::TypedProgType::Program(fn_decls) => {
             for fn_decl in fn_decls {
                 typecheck_global_decl(fn_decl);
             }

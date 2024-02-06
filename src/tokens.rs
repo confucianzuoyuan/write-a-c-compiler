@@ -1,8 +1,10 @@
 #[derive(Clone, Debug, PartialEq)]
 pub enum Token {
     Identifier(String),
-    Constant(i64),
+    ConstInt(i32),
+    ConstLong(i64),
     KWInt,
+    KWLong,
     KWReturn,
     KWVoid,
     KWIf,

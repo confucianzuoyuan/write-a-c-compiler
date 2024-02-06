@@ -16,6 +16,11 @@ mod tokens;
 mod typecheck;
 mod types;
 mod unique_ids;
+mod constants;
+mod assembly_symbols;
+mod initializers;
+mod type_utils;
+mod const_convert;
 
 fn main() {
     let program = "

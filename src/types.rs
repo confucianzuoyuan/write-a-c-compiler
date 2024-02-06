@@ -1,5 +1,9 @@
 #[derive(Clone, Debug, PartialEq)]
 pub enum Type {
     Int,
-    FunType { param_count: usize },
+    Long,
+    FunType {
+        param_types: Vec<Box<Type>>,
+        ret_type: Box<Type>,
+    },
 }

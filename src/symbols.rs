@@ -158,3 +158,10 @@ pub fn get_bytes_required(name: String) -> i64 {
         _ => panic!(),
     }
 }
+
+pub fn iter<F>(f: F) where F: Fn(String, Entry) -> () {
+    let mut _map = SYMBOL_TABLE.lock().unwrap();
+    for (k, v) in _map.iter() {
+        f(k, v);
+    }
+}

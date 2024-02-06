@@ -40,32 +40,33 @@ impl ReplacementState {
         instruction: assembly::Instruction,
     ) -> assembly::Instruction {
         match instruction {
-            assembly::Instruction::Mov(src, dst) => {
+            assembly::Instruction::Mov(t, src, dst) => {
                 let new_src = self.replace_operand(src);
                 let new_dst = self.replace_operand(dst);
-                assembly::Instruction::Mov(new_src, new_dst)
+                assembly::Instruction::Mov(t, new_src, new_dst)
             }
-            assembly::Instruction::Unary(op, dst) => {
+            assembly::Instruction::Unary(t, op, dst) => {
                 let new_dst = self.replace_operand(dst);
-                assembly::Instruction::Unary(op, new_dst)
+                assembly::Instruction::Unary(t, op, new_dst)
             }
-            assembly::Instruction::Binary { op, src, dst } => {
+            assembly::Instruction::Binary { op, t, src, dst } => {
                 let new_src = self.replace_operand(src);
                 let new_dst = self.replace_operand(dst);
                 assembly::Instruction::Binary {
                     op: op,
+                    t: t,
                     src: new_src,
                     dst: new_dst,
                 }
             }
-            assembly::Instruction::Cmp(op1, op2) => {
+            assembly::Instruction::Cmp(t, op1, op2) => {
                 let new_op1 = self.replace_operand(op1);
                 let new_op2 = self.replace_operand(op2);
-                assembly::Instruction::Cmp(new_op1, new_op2)
+                assembly::Instruction::Cmp(t, new_op1, new_op2)
             }
-            assembly::Instruction::Idiv(op) => {
+            assembly::Instruction::Idiv(t, op) => {
                 let new_op = self.replace_operand(op);
-                assembly::Instruction::Idiv(new_op)
+                assembly::Instruction::Idiv(t, new_op)
             }
             assembly::Instruction::SetCC(code, op) => {
                 let new_op = self.replace_operand(op);
@@ -76,7 +77,7 @@ impl ReplacementState {
                 assembly::Instruction::Push(new_op)
             }
             other @ (assembly::Instruction::Ret
-            | assembly::Instruction::Cdq
+            | assembly::Instruction::Cdq(_)
             | assembly::Instruction::Label(_)
             | assembly::Instruction::JmpCC(_, _)
             | assembly::Instruction::Jmp(_)

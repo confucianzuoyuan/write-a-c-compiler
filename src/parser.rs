@@ -1,4 +1,4 @@
-use crate::{ast, tokens, types};
+use crate::{ast, constants, tokens, types};
 
 pub struct Parser {
     tokens: Vec<tokens::Token>,
@@ -43,6 +43,79 @@ impl Parser {
         }
     }
 
+    fn parse_type_specifier_list(&mut self) -> Vec<tokens::Token> {
+        match self.current_token() {
+            tokens::Token::KWInt | tokens::Token::KWLong => {
+                let spec = self.current_token();
+                self.pos += 1;
+                let mut result = vec![spec];
+                result.append(&mut self.parse_type_specifier_list());
+                result
+            }
+            _ => vec![],
+        }
+    }
+
+    fn parse_specifier_list(&mut self) -> Vec<tokens::Token> {
+        match self.current_token() {
+            tokens::Token::KWInt
+            | tokens::Token::KWLong
+            | tokens::Token::KWStatic
+            | tokens::Token::KWExtern => {
+                let spec = self.current_token();
+                self.pos += 1;
+                let mut result = vec![spec];
+                result.append(&mut self.parse_specifier_list());
+                result
+            }
+            _ => vec![],
+        }
+    }
+
+    fn parse_storage_class(&mut self, storage_class: tokens::Token) -> ast::StorageClass {
+        match storage_class {
+            tokens::Token::KWExtern => ast::StorageClass::Extern,
+            tokens::Token::KWStatic => ast::StorageClass::Static,
+            _ => panic!("内部错误：bad storage class"),
+        }
+    }
+
+    fn parse_type(&mut self, token_vec: Vec<tokens::Token>) -> types::Type {
+        match token_vec.as_slice() {
+            [tokens::Token::KWInt] => types::Type::Int,
+            [tokens::Token::KWInt, tokens::Token::KWLong]
+            | [tokens::Token::KWLong, tokens::Token::KWInt]
+            | [tokens::Token::KWLong] => types::Type::Long,
+            _ => panic!("invalid type specifier."),
+        }
+    }
+
+    fn parse_type_and_storage_class(
+        &mut self,
+        specifier_list: Vec<tokens::Token>,
+    ) -> (types::Type, Option<ast::StorageClass>) {
+        let mut types = vec![];
+        let mut storage_classes = vec![];
+        for t in specifier_list {
+            if t == tokens::Token::KWInt {
+                types.push(t);
+            } else {
+                storage_classes.push(t);
+            }
+        }
+
+        if types.len() != 1 {
+            panic!("invalid type specifier.");
+        } else {
+            let storage_class = match storage_classes.len() {
+                0 => None,
+                1 => Some(self.parse_storage_class(storage_classes[0].clone())),
+                _ => panic!(),
+            };
+            (types::Type::Int, storage_class)
+        }
+    }
+
     fn parse_id(&mut self) -> String {
         match self.current_token() {
             tokens::Token::Identifier(x) => {
@@ -55,9 +128,13 @@ impl Parser {
 
     fn parse_constant(&mut self) -> ast::Exp {
         match self.current_token() {
-            tokens::Token::Constant(c) => {
+            tokens::Token::ConstInt(c) => {
                 self.pos += 1;
-                ast::Exp::Constant(c)
+                ast::Exp::Constant(constants::T::ConstInt(c))
+            }
+            tokens::Token::ConstLong(c) => {
+                self.pos += 1;
+                ast::Exp::Constant(constants::T::ConstLong(c))
             }
             other => panic!("预期是常数 token,实际是{:?}", other),
         }
@@ -105,7 +182,7 @@ impl Parser {
     /// <factor> ::= <int> | <identifier> <unop> <factor> | "(" <exp> ")"
     fn parse_factor(&mut self) -> ast::Exp {
         match self.current_token() {
-            tokens::Token::Constant(_) => self.parse_constant(),
+            tokens::Token::ConstInt(_) | tokens::Token::ConstLong(_) => self.parse_constant(),
             tokens::Token::Identifier(_) => {
                 let id = self.parse_id();
                 match self.current_token() {
@@ -227,7 +304,7 @@ impl Parser {
     ///               | "do" <statement> "while" "(" <exp> ")" ";"
     ///               | "for" "(" <for-init> [ <exp> ] ";" [ <exp> ] ")" <statement>
     ///               | ";"
-    fn parse_statement(&mut self) -> ast::Statement {
+    fn parse_statement(&mut self) -> ast::Statement<ast::Exp> {
         match self.current_token() {
             tokens::Token::KWIf => self.parse_if_statement(),
             tokens::Token::OpenBrace => ast::Statement::Compound(self.parse_block()),
@@ -261,7 +338,7 @@ impl Parser {
     }
 
     /// "if" "(" <exp> ")" <statement> [ "else" <statement> ]
-    fn parse_if_statement(&mut self) -> ast::Statement {
+    fn parse_if_statement(&mut self) -> ast::Statement<ast::Exp> {
         self.eat_token(tokens::Token::KWIf);
         self.eat_token(tokens::Token::OpenParen);
         let condition = self.parse_expression(0);
@@ -285,7 +362,7 @@ impl Parser {
     }
 
     /// "do" <statement> "while" "(" <exp> ")" ";"
-    fn parse_do_loop(&mut self) -> ast::Statement {
+    fn parse_do_loop(&mut self) -> ast::Statement<ast::Exp> {
         self.eat_token(tokens::Token::KWDo);
         let body = self.parse_statement();
         self.eat_token(tokens::Token::KWWhile);
@@ -301,7 +378,7 @@ impl Parser {
     }
 
     /// "while" "(" <exp> ")" <statement>
-    fn parse_while_loop(&mut self) -> ast::Statement {
+    fn parse_while_loop(&mut self) -> ast::Statement<ast::Exp> {
         self.eat_token(tokens::Token::KWWhile);
         self.eat_token(tokens::Token::OpenParen);
         let condition = self.parse_expression(0);
@@ -315,7 +392,7 @@ impl Parser {
     }
 
     /// "for" "(" <for-init> [ <exp> ] ";" [ <exp> ] ")" <statement>
-    fn parse_for_loop(&mut self) -> ast::Statement {
+    fn parse_for_loop(&mut self) -> ast::Statement<ast::Exp> {
         self.eat_token(tokens::Token::KWFor);
         self.eat_token(tokens::Token::OpenParen);
         let init = self.parse_for_init();
@@ -331,55 +408,8 @@ impl Parser {
         }
     }
 
-    fn parse_specifier_list(&mut self) -> Vec<tokens::Token> {
-        match self.current_token() {
-            tokens::Token::KWInt | tokens::Token::KWStatic | tokens::Token::KWExtern => {
-                let spec = self.current_token();
-                self.pos += 1;
-                let mut result = vec![spec];
-                result.append(&mut self.parse_specifier_list());
-                result
-            }
-            _ => vec![],
-        }
-    }
-
-    fn parse_storage_class(&mut self, storage_class: tokens::Token) -> ast::StorageClass {
-        match storage_class {
-            tokens::Token::KWExtern => ast::StorageClass::Extern,
-            tokens::Token::KWStatic => ast::StorageClass::Static,
-            _ => panic!("内部错误：bad storage class"),
-        }
-    }
-
-    fn parse_type_and_storage_class(
-        &mut self,
-        specifier_list: Vec<tokens::Token>,
-    ) -> (types::Type, Option<ast::StorageClass>) {
-        let mut types = vec![];
-        let mut storage_classes = vec![];
-        for t in specifier_list {
-            if t == tokens::Token::KWInt {
-                types.push(t);
-            } else {
-                storage_classes.push(t);
-            }
-        }
-
-        if types.len() != 1 {
-            panic!("invalid type specifier.");
-        } else {
-            let storage_class = match storage_classes.len() {
-                0 => None,
-                1 => Some(self.parse_storage_class(storage_classes[0].clone())),
-                _ => panic!(),
-            };
-            (types::Type::Int, storage_class)
-        }
-    }
-
     /// <block-item> ::= <statement> | <declaration>
-    fn parse_block_item(&mut self) -> ast::BlockItem {
+    fn parse_block_item(&mut self) -> ast::BlockItem<ast::Exp> {
         match self.current_token() {
             tokens::Token::KWInt | tokens::Token::KWStatic | tokens::Token::KWExtern => {
                 ast::BlockItem::D(self.parse_declaration())
@@ -388,7 +418,7 @@ impl Parser {
         }
     }
 
-    fn parse_block_item_list(&mut self) -> Vec<ast::BlockItem> {
+    fn parse_block_item_list(&mut self) -> Vec<ast::BlockItem<ast::Exp>> {
         match self.current_token() {
             tokens::Token::CloseBrace => {
                 vec![]
@@ -403,7 +433,7 @@ impl Parser {
     }
 
     /// <block> ::= "{" { <block-item> } "}"
-    fn parse_block(&mut self) -> ast::Block {
+    fn parse_block(&mut self) -> ast::Block<ast::Exp> {
         self.eat_token(tokens::Token::OpenBrace);
         let block_items = self.parse_block_item_list();
         self.eat_token(tokens::Token::CloseBrace);
@@ -412,17 +442,24 @@ impl Parser {
 
     fn finish_parsing_function_declaration(
         &mut self,
+        ret_type: types::Type,
         storage_class: Option<ast::StorageClass>,
         name: String,
-    ) -> ast::FunctionDeclaration {
+    ) -> ast::FunctionDeclaration<ast::Exp> {
         self.eat_token(tokens::Token::OpenParen);
-        let params = match self.current_token() {
+        let params_with_types = match self.current_token() {
             tokens::Token::KWVoid => {
                 self.eat_token(tokens::Token::KWVoid);
                 vec![]
             }
             _ => self.parse_param_list(),
         };
+        let mut param_types = vec![];
+        let mut params = vec![];
+        for p in params_with_types {
+            param_types.push(p.0);
+            params.push(p.1);
+        }
         self.eat_token(tokens::Token::CloseParen);
         let body = match self.current_token() {
             tokens::Token::OpenBrace => Some(self.parse_block()),
@@ -432,37 +469,45 @@ impl Parser {
             }
             other => panic!("预期是函数体或者分号，实际上是：{:?}", other),
         };
+        let fun_type = types::Type::FunType {
+            param_types: param_types,
+            ret_type: ret_type,
+        };
         ast::FunctionDeclaration {
             name: name,
+            fun_type: fun_type,
             params: params,
             body: body,
             storage_class: storage_class,
         }
     }
 
-    fn parse_param_list(&mut self) -> Vec<String> {
-        self.eat_token(tokens::Token::KWInt);
+    fn parse_param_list(&mut self) -> Vec<(types::Type, String)> {
+        let specifiers = self.parse_type_specifier_list();
+        let param_type = self.parse_type(specifiers);
         let next_param = self.parse_id();
         match self.current_token() {
             tokens::Token::Comma => {
                 self.eat_token(tokens::Token::Comma);
                 let mut result = vec![];
-                result.push(next_param);
+                result.push((param_type, next_param));
                 result.append(&mut self.parse_param_list());
                 result
             }
-            _ => vec![next_param],
+            _ => vec![(param_type, next_param)],
         }
     }
 
     fn finish_parsing_variable_declaration(
         &mut self,
+        var_type: types::Type,
         storage_class: Option<ast::StorageClass>,
         name: String,
-    ) -> ast::VariableDeclaration {
+    ) -> ast::VariableDeclaration<ast::Exp> {
         match self.current_token() {
             tokens::Token::Semicolon => ast::VariableDeclaration {
                 name: name,
+                var_type: var_type,
                 init: None,
                 storage_class: storage_class,
             },
@@ -472,6 +517,7 @@ impl Parser {
                 self.eat_token(tokens::Token::Semicolon);
                 ast::VariableDeclaration {
                     name: name,
+                    var_type: var_type,
                     init: Some(init),
                     storage_class: storage_class,
                 }
@@ -480,21 +526,21 @@ impl Parser {
         }
     }
 
-    fn parse_declaration(&mut self) -> ast::Declaration {
+    fn parse_declaration(&mut self) -> ast::Declaration<ast::Exp> {
         let specifiers = self.parse_specifier_list();
         let (_typ, storage_class) = self.parse_type_and_storage_class(specifiers);
         let name = self.parse_id();
         match self.current_token() {
             tokens::Token::OpenParen => ast::Declaration::FunDecl(
-                self.finish_parsing_function_declaration(storage_class, name),
+                self.finish_parsing_function_declaration(_typ, storage_class, name),
             ),
             _ => ast::Declaration::VarDecl(
-                self.finish_parsing_variable_declaration(storage_class, name),
+                self.finish_parsing_variable_declaration(_typ, storage_class, name),
             ),
         }
     }
 
-    fn parse_variable_declaration(&mut self) -> ast::VariableDeclaration {
+    fn parse_variable_declaration(&mut self) -> ast::VariableDeclaration<ast::Exp> {
         match self.parse_declaration() {
             ast::Declaration::VarDecl(vd) => vd,
             ast::Declaration::FunDecl(_) => panic!("预期是变量声明，这里是函数声明。"),
@@ -502,7 +548,7 @@ impl Parser {
     }
 
     /// <for-init> ::= <declaration> | [ <exp> ] ";"
-    fn parse_for_init(&mut self) -> ast::ForInit {
+    fn parse_for_init(&mut self) -> ast::ForInit<ast::Exp> {
         match self.current_token() {
             tokens::Token::KWInt | tokens::Token::KWStatic | tokens::Token::KWExtern => {
                 ast::ForInit::InitDecl(self.parse_variable_declaration())
@@ -515,7 +561,7 @@ impl Parser {
     }
 
     /// <function> ::= "int" <identifier> "(" "void" ")" "{" { <block-item> } "}"
-    fn parse_declaration_list(&mut self) -> Vec<ast::Declaration> {
+    fn parse_declaration_list(&mut self) -> Vec<ast::Declaration<ast::Exp>> {
         match self.current_token() {
             tokens::Token::Eof => vec![],
             _ => {
@@ -528,8 +574,8 @@ impl Parser {
     }
 
     /// <program> ::= <function>
-    pub fn parse(&mut self) -> ast::T {
+    pub fn parse(&mut self) -> ast::UntypedProgType {
         let declarations = self.parse_declaration_list();
-        ast::T::Program(declarations)
+        ast::UntypedProgType::Program(declarations)
     }
 }
